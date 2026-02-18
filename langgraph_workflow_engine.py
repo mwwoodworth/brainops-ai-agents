@@ -26,9 +26,9 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Callable, Literal, Optional, TypedDict, Union
+from typing import Any, Awaitable, Callable, Optional, TypedDict
 
-import asyncpg
+from database.async_connection import get_tenant_pool
 
 # LangGraph imports (conditional)
 try:
@@ -48,23 +48,54 @@ logger = logging.getLogger(__name__)
 # DATABASE CONNECTION
 # =============================================================================
 
-_db_pool: Optional[asyncpg.Pool] = None
+DEFAULT_TENANT_ID = (
+    os.getenv("DEFAULT_TENANT_ID")
+    or os.getenv("TENANT_ID")
+    or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+)
 
 
-async def get_workflow_pool() -> asyncpg.Pool:
-    """Get or create database connection pool for workflow engine."""
-    global _db_pool
-    if _db_pool is None:
-        database_url = os.getenv('DATABASE_URL', '')
-        if database_url:
-            _db_pool = await asyncpg.create_pool(
-                database_url,
-                min_size=1,
-                max_size=2,
-                command_timeout=60,
-                ssl='require'
-            )
-    return _db_pool
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Return whether an environment-variable feature flag is enabled."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+FEATURE_LANGGRAPH_PARALLEL_NODES = _env_flag("ENABLE_LANGGRAPH_PARALLEL_NODES", False)
+FEATURE_LANGGRAPH_WORKFLOW_COMPOSITION = _env_flag(
+    "ENABLE_LANGGRAPH_WORKFLOW_COMPOSITION", False
+)
+FEATURE_LANGGRAPH_ERROR_RECOVERY = _env_flag("ENABLE_LANGGRAPH_ERROR_RECOVERY", False)
+FEATURE_LANGGRAPH_WORKFLOW_VERSIONING = _env_flag(
+    "ENABLE_LANGGRAPH_WORKFLOW_VERSIONING", False
+)
+FEATURE_LANGGRAPH_STATE_CHECKPOINTS = _env_flag(
+    "ENABLE_LANGGRAPH_STATE_CHECKPOINTS", False
+)
+
+
+def _resolve_tenant_id(candidate: Optional[str] = None) -> str:
+    """Resolve tenant id for scoped DB operations."""
+    tenant_id = (candidate or "").strip()
+    return tenant_id or DEFAULT_TENANT_ID
+
+
+async def get_workflow_pool():
+    """Get tenant-scoped pool used by the workflow engine."""
+    return get_tenant_pool(_resolve_tenant_id())
+
+
+@asynccontextmanager
+async def get_workflow_connection(tenant_id: Optional[str] = None):
+    """Get a tenant-scoped database connection for workflow persistence."""
+    scoped_pool = get_tenant_pool(_resolve_tenant_id(tenant_id))
+    conn = await scoped_pool.acquire()
+    try:
+        yield conn
+    finally:
+        await scoped_pool.release(conn)
 
 
 # =============================================================================
@@ -138,7 +169,10 @@ class BaseWorkflowState(TypedDict, total=False):
     # Core identification
     workflow_id: str
     workflow_type: str
+    workflow_version: str
     tenant_id: str
+    parent_workflow_id: Optional[str]
+    child_workflow_ids: list[str]
 
     # Status tracking
     status: str
@@ -161,6 +195,8 @@ class BaseWorkflowState(TypedDict, total=False):
     errors: list[dict]
     retry_count: int
     max_retries: int
+    error_recovery_node: Optional[str]
+    error_recovery_action: Optional[str]
 
     # Timing
     started_at: str
@@ -169,6 +205,7 @@ class BaseWorkflowState(TypedDict, total=False):
 
     # Results
     result: Optional[dict]
+    parallel_results: dict[str, Any]
     metadata: dict
 
 
@@ -224,15 +261,18 @@ class PostgresCheckpointSaver:
         workflow_type: str,
         state: dict,
         current_node: str,
-        metadata: dict = None
+        metadata: dict = None,
+        tenant_id: str | None = None,
     ) -> Optional[str]:
         """Save workflow checkpoint."""
         if not await self.initialize():
             return None
 
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            resolved_tenant = _resolve_tenant_id(
+                tenant_id or state.get("tenant_id") or (metadata or {}).get("tenant_id")
+            )
+            async with get_workflow_connection(resolved_tenant) as conn:
                 # Upsert checkpoint
                 row = await conn.fetchrow("""
                     INSERT INTO workflow_checkpoints
@@ -255,14 +295,17 @@ class PostgresCheckpointSaver:
             logger.error(f"Failed to save checkpoint: {e}")
             return None
 
-    async def load_checkpoint(self, workflow_id: str) -> Optional[WorkflowCheckpoint]:
+    async def load_checkpoint(
+        self,
+        workflow_id: str,
+        tenant_id: str | None = None,
+    ) -> Optional[WorkflowCheckpoint]:
         """Load workflow checkpoint."""
         if not await self.initialize():
             return None
 
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 row = await conn.fetchrow("""
                     SELECT id, workflow_id, workflow_type, state_data,
                            current_node, created_at, metadata
@@ -273,28 +316,40 @@ class PostgresCheckpointSaver:
                 if not row:
                     return None
 
+                raw_state_data = row["state_data"]
+                raw_metadata = row["metadata"]
+                parsed_state = (
+                    json.loads(raw_state_data)
+                    if isinstance(raw_state_data, str)
+                    else (raw_state_data or {})
+                )
+                parsed_metadata = (
+                    json.loads(raw_metadata)
+                    if isinstance(raw_metadata, str)
+                    else (raw_metadata or {})
+                )
+
                 return WorkflowCheckpoint(
                     checkpoint_id=str(row['id']),
                     workflow_id=row['workflow_id'],
                     workflow_type=row['workflow_type'],
-                    state_data=json.loads(row['state_data']),
+                    state_data=parsed_state,
                     current_node=row['current_node'],
                     created_at=row['created_at'],
-                    metadata=json.loads(row['metadata']) if row['metadata'] else {}
+                    metadata=parsed_metadata,
                 )
 
         except Exception as e:
             logger.error(f"Failed to load checkpoint: {e}")
             return None
 
-    async def delete_checkpoint(self, workflow_id: str) -> bool:
+    async def delete_checkpoint(self, workflow_id: str, tenant_id: str | None = None) -> bool:
         """Delete workflow checkpoint after completion."""
         if not await self.initialize():
             return False
 
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 await conn.execute("""
                     DELETE FROM workflow_checkpoints WHERE workflow_id = $1
                 """, workflow_id)
@@ -324,14 +379,15 @@ class HumanInTheLoopManager:
         description: str,
         context: dict,
         options: list[str] = None,
-        timeout_minutes: int = 60
+        timeout_minutes: int = 60,
+        tenant_id: str | None = None,
     ) -> HumanApprovalRequest:
         """Create an approval request and pause the workflow."""
         options = options or ["approve", "reject"]
 
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            resolved_tenant = _resolve_tenant_id(tenant_id or context.get("tenant_id"))
+            async with get_workflow_connection(resolved_tenant) as conn:
                 row = await conn.fetchrow("""
                     INSERT INTO workflow_approval_requests
                         (workflow_id, node_name, description, context, options, timeout_minutes)
@@ -355,11 +411,14 @@ class HumanInTheLoopManager:
             logger.error(f"Failed to create approval request: {e}")
             raise
 
-    async def get_approval_status(self, request_id: str) -> Optional[HumanApprovalRequest]:
+    async def get_approval_status(
+        self,
+        request_id: str,
+        tenant_id: str | None = None,
+    ) -> Optional[HumanApprovalRequest]:
         """Get current status of an approval request."""
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 row = await conn.fetchrow("""
                     SELECT * FROM workflow_approval_requests WHERE id = $1
                 """, request_id)
@@ -372,16 +431,31 @@ class HumanInTheLoopManager:
                     created = row['created_at']
                     timeout = timedelta(minutes=row['timeout_minutes'])
                     if datetime.now(timezone.utc) > created + timeout:
-                        await self._update_approval_status(request_id, 'timeout')
-                        return await self.get_approval_status(request_id)
+                        await self._update_approval_status(
+                            request_id,
+                            "timeout",
+                            tenant_id=tenant_id,
+                        )
+                        return await self.get_approval_status(request_id, tenant_id=tenant_id)
+
+                parsed_context = (
+                    json.loads(row["context"])
+                    if isinstance(row["context"], str)
+                    else (row["context"] or {})
+                )
+                parsed_options = (
+                    json.loads(row["options"])
+                    if isinstance(row["options"], str)
+                    else (row["options"] or [])
+                )
 
                 return HumanApprovalRequest(
                     request_id=str(row['id']),
                     workflow_id=row['workflow_id'],
                     node_name=row['node_name'],
                     description=row['description'],
-                    context=json.loads(row['context']) if row['context'] else {},
-                    options=json.loads(row['options']) if row['options'] else [],
+                    context=parsed_context,
+                    options=parsed_options,
                     timeout_minutes=row['timeout_minutes'],
                     created_at=row['created_at'],
                     status=HumanApprovalStatus(row['status']),
@@ -398,12 +472,12 @@ class HumanInTheLoopManager:
         self,
         request_id: str,
         response: str,
-        responded_by: str
+        responded_by: str,
+        tenant_id: str | None = None,
     ) -> bool:
         """Submit human response to an approval request."""
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 # Validate response against options
                 row = await conn.fetchrow("""
                     SELECT options FROM workflow_approval_requests WHERE id = $1
@@ -413,7 +487,11 @@ class HumanInTheLoopManager:
                     logger.error(f"Approval request {request_id} not found")
                     return False
 
-                options = json.loads(row['options']) if row['options'] else []
+                options = (
+                    json.loads(row["options"])
+                    if isinstance(row["options"], str)
+                    else (row["options"] or [])
+                )
                 if options and response not in options:
                     logger.error(f"Invalid response '{response}'. Options: {options}")
                     return False
@@ -433,11 +511,15 @@ class HumanInTheLoopManager:
             logger.error(f"Failed to submit approval: {e}")
             return False
 
-    async def _update_approval_status(self, request_id: str, status: str) -> None:
+    async def _update_approval_status(
+        self,
+        request_id: str,
+        status: str,
+        tenant_id: str | None = None,
+    ) -> None:
         """Update approval request status."""
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 await conn.execute("""
                     UPDATE workflow_approval_requests SET status = $1 WHERE id = $2
                 """, status, request_id)
@@ -452,8 +534,7 @@ class HumanInTheLoopManager:
     ) -> list[HumanApprovalRequest]:
         """Get all pending approval requests."""
         try:
-            pool = await get_workflow_pool()
-            async with pool.acquire() as conn:
+            async with get_workflow_connection(_resolve_tenant_id(tenant_id)) as conn:
                 query = """
                     SELECT ar.*, wc.workflow_type
                     FROM workflow_approval_requests ar
@@ -477,8 +558,16 @@ class HumanInTheLoopManager:
                         workflow_id=row['workflow_id'],
                         node_name=row['node_name'],
                         description=row['description'],
-                        context=json.loads(row['context']) if row['context'] else {},
-                        options=json.loads(row['options']) if row['options'] else [],
+                        context=(
+                            json.loads(row["context"])
+                            if isinstance(row["context"], str)
+                            else (row["context"] or {})
+                        ),
+                        options=(
+                            json.loads(row["options"])
+                            if isinstance(row["options"], str)
+                            else (row["options"] or [])
+                        ),
                         timeout_minutes=row['timeout_minutes'],
                         created_at=row['created_at'],
                         status=HumanApprovalStatus(row['status'])
@@ -740,12 +829,14 @@ class WorkflowTemplate(ABC):
         workflow_type: str,
         checkpoint_saver: PostgresCheckpointSaver = None,
         hitl_manager: HumanInTheLoopManager = None,
-        ooda_executor: OODALoopExecutor = None
+        ooda_executor: OODALoopExecutor = None,
+        workflow_registry: Optional[dict[str, type["WorkflowTemplate"]]] = None,
     ):
         self.workflow_type = workflow_type
         self.checkpoint_saver = checkpoint_saver or PostgresCheckpointSaver()
         self.hitl_manager = hitl_manager or HumanInTheLoopManager(self.checkpoint_saver)
         self.ooda_executor = ooda_executor or OODALoopExecutor()
+        self.workflow_registry = workflow_registry or {}
         self._graph = None
 
     @abstractmethod
@@ -771,6 +862,240 @@ class WorkflowTemplate(ABC):
         """Get list of nodes that require human approval."""
         return []
 
+    def define_error_recovery_nodes(self) -> dict[str, Callable[[BaseWorkflowState], Awaitable[BaseWorkflowState]]]:
+        """Define optional workflow error recovery nodes."""
+        return {"error_recovery": self._default_error_recovery_node}
+
+    def get_error_recovery_node(self) -> Optional[str]:
+        """Get the default error recovery node name."""
+        nodes = self.define_error_recovery_nodes()
+        if not nodes:
+            return None
+        if "error_recovery" in nodes:
+            return "error_recovery"
+        return next(iter(nodes))
+
+    def get_subworkflow_bindings(self) -> dict[str, str]:
+        """Map node name -> child workflow type for composition."""
+        return {}
+
+    def define_parallel_fanouts(self) -> list[dict[str, Any]]:
+        """Define optional fan-out/fan-in topology metadata."""
+        return []
+
+    async def _default_error_recovery_node(self, state: BaseWorkflowState) -> BaseWorkflowState:
+        """Default error-recovery node that retries or checkpoints."""
+        state["status"] = WorkflowStatus.CHECKPOINT.value
+        state["error_recovery_action"] = "checkpoint_for_retry"
+        state["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+
+        if state.get("retry_count", 0) > state.get("max_retries", 3):
+            state["status"] = WorkflowStatus.FAILED.value
+            state["error_recovery_action"] = "max_retries_exceeded"
+
+        return state
+
+    async def _resolve_workflow_version(
+        self,
+        tenant_id: str,
+        fallback: str = "1.0.0",
+    ) -> str:
+        """Resolve current workflow version from langgraph_workflows when enabled."""
+        if not FEATURE_LANGGRAPH_WORKFLOW_VERSIONING:
+            return fallback
+
+        try:
+            async with get_workflow_connection(tenant_id) as conn:
+                row = await conn.fetchrow(
+                    """
+                    SELECT version
+                    FROM langgraph_workflows
+                    WHERE LOWER(name) = LOWER($1)
+                       OR LOWER(COALESCE(graph_type, '')) = LOWER($1)
+                    ORDER BY updated_at DESC NULLS LAST, created_at DESC NULLS LAST
+                    LIMIT 1
+                    """,
+                    self.workflow_type,
+                )
+                if row and row["version"]:
+                    return str(row["version"])
+        except Exception as exc:
+            logger.warning(
+                "Workflow version lookup failed for %s: %s",
+                self.workflow_type,
+                exc,
+            )
+        return fallback
+
+    def _resolve_error_handler(self) -> Optional[Callable[[BaseWorkflowState], Awaitable[BaseWorkflowState]]]:
+        """Resolve the active error handler callable when feature is enabled."""
+        if not FEATURE_LANGGRAPH_ERROR_RECOVERY:
+            return None
+        error_node_name = self.get_error_recovery_node()
+        if not error_node_name:
+            return None
+        return self.define_error_recovery_nodes().get(error_node_name)
+
+    def _wrap_node_handler(
+        self,
+        node_name: str,
+        handler: Callable[[BaseWorkflowState], Awaitable[BaseWorkflowState]],
+        error_handler: Optional[Callable[[BaseWorkflowState], Awaitable[BaseWorkflowState]]],
+    ) -> Callable[[BaseWorkflowState], Awaitable[BaseWorkflowState]]:
+        """Wrap a node with state bookkeeping, checkpointing, and error handling."""
+
+        async def _wrapped(state: BaseWorkflowState) -> BaseWorkflowState:
+            state.setdefault("previous_nodes", [])
+            state.setdefault("errors", [])
+            state.setdefault("metadata", {})
+            state.setdefault("parallel_results", {})
+            state.setdefault("child_workflow_ids", [])
+
+            state["current_node"] = node_name
+            state["last_updated_at"] = datetime.now(timezone.utc).isoformat()
+            if not state["previous_nodes"] or state["previous_nodes"][-1] != node_name:
+                state["previous_nodes"].append(node_name)
+
+            try:
+                updated_state = await handler(state)
+
+                if FEATURE_LANGGRAPH_WORKFLOW_COMPOSITION:
+                    subworkflow_type = self.get_subworkflow_bindings().get(node_name)
+                    if subworkflow_type:
+                        sub_result = await self.execute_subworkflow(
+                            subworkflow_type=subworkflow_type,
+                            parent_state=updated_state,
+                        )
+                        updated_state.setdefault("metadata", {}).setdefault(
+                            "subworkflow_results", {}
+                        )[subworkflow_type] = sub_result
+                        child_id = sub_result.get("workflow_id")
+                        if child_id:
+                            updated_state.setdefault("child_workflow_ids", []).append(child_id)
+                        if sub_result.get("status") == WorkflowStatus.FAILED.value:
+                            updated_state.setdefault("errors", []).append(
+                                {
+                                    "node": node_name,
+                                    "error": f"Subworkflow '{subworkflow_type}' failed",
+                                    "subworkflow_result": sub_result,
+                                }
+                            )
+                return updated_state
+
+            except Exception as exc:
+                state["retry_count"] = state.get("retry_count", 0) + 1
+                state["errors"].append(
+                    {
+                        "node": node_name,
+                        "error": str(exc),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                state["metadata"]["last_error"] = str(exc)
+                if error_handler:
+                    state["error_recovery_node"] = self.get_error_recovery_node()
+                    return await error_handler(state)
+                raise
+
+            finally:
+                if FEATURE_LANGGRAPH_STATE_CHECKPOINTS:
+                    try:
+                        await self.checkpoint_saver.save_checkpoint(
+                            workflow_id=state.get("workflow_id"),
+                            workflow_type=self.workflow_type,
+                            state=state,
+                            current_node=node_name,
+                            metadata={
+                                "tenant_id": state.get("tenant_id"),
+                                "checkpoint_reason": "node_completion",
+                                "workflow_version": state.get("workflow_version"),
+                            },
+                            tenant_id=state.get("tenant_id"),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Checkpoint save failed for node %s in %s: %s",
+                            node_name,
+                            self.workflow_type,
+                            exc,
+                        )
+
+        return _wrapped
+
+    async def run_parallel_nodes(
+        self,
+        state: BaseWorkflowState,
+        node_names: list[str],
+        *,
+        group_name: str = "default",
+    ) -> BaseWorkflowState:
+        """Execute node handlers concurrently and capture fan-out/fan-in results."""
+        if not FEATURE_LANGGRAPH_PARALLEL_NODES:
+            return state
+
+        nodes = self.define_nodes()
+        state.setdefault("parallel_results", {})
+
+        async def _run_node(node_name: str) -> tuple[str, dict[str, Any]]:
+            handler = nodes.get(node_name)
+            if not handler:
+                return node_name, {"status": "missing_node", "error": "node_not_registered"}
+            branch_state: BaseWorkflowState = {
+                **state,
+                "current_node": node_name,
+                "metadata": dict(state.get("metadata", {})),
+            }
+            try:
+                branch_result = await handler(branch_state)
+                return node_name, {
+                    "status": "completed",
+                    "result": branch_result.get("result"),
+                    "metadata": branch_result.get("metadata", {}),
+                }
+            except Exception as exc:
+                return node_name, {"status": "failed", "error": str(exc)}
+
+        results = await asyncio.gather(*[_run_node(node) for node in node_names])
+        state["parallel_results"][group_name] = {name: output for name, output in results}
+        return state
+
+    async def execute_subworkflow(
+        self,
+        subworkflow_type: str,
+        parent_state: BaseWorkflowState,
+    ) -> dict[str, Any]:
+        """Execute a child workflow and return its result payload."""
+        if not FEATURE_LANGGRAPH_WORKFLOW_COMPOSITION:
+            return {"status": "skipped", "reason": "workflow_composition_disabled"}
+
+        template_class = self.workflow_registry.get(subworkflow_type)
+        if not template_class:
+            return {
+                "status": WorkflowStatus.FAILED.value,
+                "error": f"Unknown subworkflow type: {subworkflow_type}",
+            }
+
+        composed_state = {
+            "parent_workflow_id": parent_state.get("workflow_id"),
+            "tenant_id": parent_state.get("tenant_id"),
+            "metadata": {
+                **parent_state.get("metadata", {}),
+                "composed_by": self.workflow_type,
+            },
+        }
+
+        template = template_class(
+            checkpoint_saver=self.checkpoint_saver,
+            hitl_manager=self.hitl_manager,
+            ooda_executor=self.ooda_executor,
+            workflow_registry=self.workflow_registry,
+        )
+        return await template.execute(
+            initial_state=composed_state,
+            tenant_id=parent_state.get("tenant_id"),
+            timeout_seconds=int(parent_state.get("metadata", {}).get("subworkflow_timeout_seconds", 180)),
+        )
+
     def build_graph(self) -> Optional[StateGraph]:
         """Build the LangGraph workflow graph."""
         if not LANGGRAPH_AVAILABLE:
@@ -780,9 +1105,18 @@ class WorkflowTemplate(ABC):
         # Create state graph
         graph = StateGraph(BaseWorkflowState)
 
+        error_handler = self._resolve_error_handler()
+
         # Add nodes
-        for name, handler in self.define_nodes().items():
-            graph.add_node(name, handler)
+        defined_nodes = self.define_nodes()
+        for name, handler in defined_nodes.items():
+            wrapped = self._wrap_node_handler(name, handler, error_handler)
+            graph.add_node(name, wrapped)
+
+        if FEATURE_LANGGRAPH_ERROR_RECOVERY:
+            for recovery_name, recovery_handler in self.define_error_recovery_nodes().items():
+                if recovery_name not in defined_nodes:
+                    graph.add_node(recovery_name, recovery_handler)
 
         # Add edges
         for source, target in self.define_edges():
@@ -801,6 +1135,19 @@ class WorkflowTemplate(ABC):
             mapping = {k: END if v == "END" else v for k, v in mapping.items()}
             graph.add_conditional_edges(source, condition, mapping)
 
+        if FEATURE_LANGGRAPH_PARALLEL_NODES:
+            for fanout in self.define_parallel_fanouts():
+                source = fanout.get("source")
+                branches = fanout.get("branches", [])
+                join = fanout.get("join")
+                if not source or not branches:
+                    continue
+                for branch in branches:
+                    graph.add_edge(source, branch)
+                if join:
+                    for branch in branches:
+                        graph.add_edge(branch, join)
+
         # Set entry point
         graph.set_entry_point(self.get_entry_point())
 
@@ -815,12 +1162,20 @@ class WorkflowTemplate(ABC):
     ) -> dict:
         """Execute the workflow with checkpointing support."""
         workflow_id = initial_state.get("workflow_id") or str(uuid.uuid4())
+        tenant = _resolve_tenant_id(tenant_id or initial_state.get("tenant_id"))
+        workflow_version = await self._resolve_workflow_version(
+            tenant_id=tenant,
+            fallback=str(initial_state.get("workflow_version") or "1.0.0"),
+        )
 
         # Build state
         state: BaseWorkflowState = {
             "workflow_id": workflow_id,
             "workflow_type": self.workflow_type,
-            "tenant_id": tenant_id or "default",
+            "workflow_version": workflow_version,
+            "tenant_id": tenant,
+            "parent_workflow_id": initial_state.get("parent_workflow_id"),
+            "child_workflow_ids": [],
             "status": WorkflowStatus.RUNNING.value,
             "current_node": self.get_entry_point(),
             "previous_nodes": [],
@@ -835,21 +1190,36 @@ class WorkflowTemplate(ABC):
             "errors": [],
             "retry_count": 0,
             "max_retries": 3,
+            "error_recovery_node": self.get_error_recovery_node(),
+            "error_recovery_action": None,
             "started_at": datetime.now(timezone.utc).isoformat(),
             "last_updated_at": datetime.now(timezone.utc).isoformat(),
             "deadline": None,
             "result": None,
+            "parallel_results": {},
             "metadata": {},
             **initial_state
         }
 
         try:
             # Check for existing checkpoint
-            checkpoint = await self.checkpoint_saver.load_checkpoint(workflow_id)
+            checkpoint = await self.checkpoint_saver.load_checkpoint(
+                workflow_id,
+                tenant_id=tenant,
+            )
             if checkpoint:
                 logger.info(f"Resuming workflow {workflow_id} from checkpoint")
                 state = {**state, **checkpoint.state_data}
                 state["current_node"] = checkpoint.current_node
+
+            if FEATURE_LANGGRAPH_PARALLEL_NODES:
+                parallel_entry_nodes = state.get("metadata", {}).get("parallel_entry_nodes", [])
+                if parallel_entry_nodes:
+                    state = await self.run_parallel_nodes(
+                        state,
+                        node_names=list(parallel_entry_nodes),
+                        group_name="entry",
+                    )
 
             # Build and execute graph
             graph = self.build_graph()
@@ -862,15 +1232,38 @@ class WorkflowTemplate(ABC):
                 # Fallback execution without LangGraph
                 final_state = await self._fallback_execute(state)
 
+            if final_state.get("requires_approval"):
+                final_state["status"] = WorkflowStatus.PAUSED.value
+                await self.checkpoint_saver.save_checkpoint(
+                    workflow_id=workflow_id,
+                    workflow_type=self.workflow_type,
+                    state=final_state,
+                    current_node=final_state.get("current_node", "approval_wait"),
+                    metadata={
+                        "tenant_id": tenant,
+                        "workflow_version": final_state.get("workflow_version"),
+                        "approval_request_id": final_state.get("approval_request_id"),
+                    },
+                    tenant_id=tenant,
+                )
+
             # Clean up checkpoint on success
             if final_state.get("status") == WorkflowStatus.COMPLETED.value:
-                await self.checkpoint_saver.delete_checkpoint(workflow_id)
+                await self.checkpoint_saver.delete_checkpoint(workflow_id, tenant_id=tenant)
 
             return {
                 "workflow_id": workflow_id,
+                "workflow_version": final_state.get("workflow_version", workflow_version),
                 "status": final_state.get("status"),
                 "result": final_state.get("result"),
                 "errors": final_state.get("errors", []),
+                "parallel_results": final_state.get("parallel_results", {}),
+                "child_workflow_ids": final_state.get("child_workflow_ids", []),
+                "approval_request_id": final_state.get("approval_request_id"),
+                "can_resume": final_state.get("status") in {
+                    WorkflowStatus.CHECKPOINT.value,
+                    WorkflowStatus.PAUSED.value,
+                },
                 "execution_summary": {
                     "nodes_visited": final_state.get("previous_nodes", []),
                     "decisions_made": len(final_state.get("decisions", [])),
@@ -881,11 +1274,21 @@ class WorkflowTemplate(ABC):
         except asyncio.TimeoutError:
             # Save checkpoint before timeout
             await self.checkpoint_saver.save_checkpoint(
-                workflow_id, self.workflow_type, state, state.get("current_node", "unknown"),
-                {"timeout": True, "timeout_seconds": timeout_seconds}
+                workflow_id,
+                self.workflow_type,
+                state,
+                state.get("current_node", "unknown"),
+                {
+                    "timeout": True,
+                    "timeout_seconds": timeout_seconds,
+                    "tenant_id": tenant,
+                    "workflow_version": workflow_version,
+                },
+                tenant_id=tenant,
             )
             return {
                 "workflow_id": workflow_id,
+                "workflow_version": workflow_version,
                 "status": WorkflowStatus.CHECKPOINT.value,
                 "error": f"Workflow timed out after {timeout_seconds}s, checkpoint saved",
                 "can_resume": True
@@ -893,8 +1296,40 @@ class WorkflowTemplate(ABC):
 
         except Exception as e:
             logger.error(f"Workflow {workflow_id} failed: {e}")
+            if FEATURE_LANGGRAPH_ERROR_RECOVERY:
+                state.setdefault("errors", []).append(
+                    {
+                        "error": str(e),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "node": state.get("current_node"),
+                    }
+                )
+                state["retry_count"] = state.get("retry_count", 0) + 1
+                recovery_state = await self._default_error_recovery_node(state)
+                if recovery_state.get("status") == WorkflowStatus.CHECKPOINT.value:
+                    await self.checkpoint_saver.save_checkpoint(
+                        workflow_id=workflow_id,
+                        workflow_type=self.workflow_type,
+                        state=recovery_state,
+                        current_node=recovery_state.get("current_node", "error_recovery"),
+                        metadata={
+                            "tenant_id": tenant,
+                            "workflow_version": workflow_version,
+                            "error_recovery_action": recovery_state.get("error_recovery_action"),
+                        },
+                        tenant_id=tenant,
+                    )
+                    return {
+                        "workflow_id": workflow_id,
+                        "workflow_version": workflow_version,
+                        "status": WorkflowStatus.CHECKPOINT.value,
+                        "error": str(e),
+                        "errors": recovery_state.get("errors", []),
+                        "can_resume": True,
+                    }
             return {
                 "workflow_id": workflow_id,
+                "workflow_version": workflow_version,
                 "status": WorkflowStatus.FAILED.value,
                 "error": str(e),
                 "errors": state.get("errors", []) + [{"error": str(e)}]
@@ -902,8 +1337,16 @@ class WorkflowTemplate(ABC):
 
     async def _fallback_execute(self, state: BaseWorkflowState) -> BaseWorkflowState:
         """Fallback execution when LangGraph is not available."""
-        nodes = self.define_nodes()
+        error_handler = self._resolve_error_handler()
+        nodes = {
+            name: self._wrap_node_handler(name, handler, error_handler)
+            for name, handler in self.define_nodes().items()
+        }
         edges = self.define_edges()
+        conditional_edges = {
+            edge["source"]: (edge["condition"], edge["mapping"])
+            for edge in self.define_conditional_edges()
+        }
 
         current = self.get_entry_point()
         visited = []
@@ -918,18 +1361,30 @@ class WorkflowTemplate(ABC):
                 handler = nodes[current]
                 state = await handler(state)
 
-                # Find next node
+                # Find next node (conditional first, then static edge)
                 next_node = None
-                for source, target in edges:
-                    if source == current:
-                        next_node = target
-                        break
+                conditional = conditional_edges.get(current)
+                if conditional:
+                    condition_fn, mapping = conditional
+                    route = condition_fn(state)
+                    next_node = mapping.get(route)
+
+                if not next_node:
+                    for source, target in edges:
+                        if source == current:
+                            next_node = target
+                            break
 
                 current = next_node
             else:
                 break
 
-        state["status"] = WorkflowStatus.COMPLETED.value
+        if state.get("status") not in {
+            WorkflowStatus.FAILED.value,
+            WorkflowStatus.PAUSED.value,
+            WorkflowStatus.CHECKPOINT.value,
+        }:
+            state["status"] = WorkflowStatus.COMPLETED.value
         return state
 
 
@@ -1147,7 +1602,8 @@ class CustomerOnboardingWorkflow(WorkflowTemplate):
                 "stage": state.get("onboarding_stage"),
                 "issues": state.get("errors", [])
             },
-            options=["approve_continue", "assign_to_agent", "cancel"]
+            options=["approve_continue", "assign_to_agent", "cancel"],
+            tenant_id=state.get("tenant_id"),
         )
 
         state["approval_request_id"] = request.request_id
@@ -1338,7 +1794,8 @@ class InvoiceCollectionWorkflow(WorkflowTemplate):
                 "customer_id": state.get("customer_id"),
                 "suggested_plan": "3 monthly payments"
             },
-            options=["approve_plan", "modify_plan", "skip_to_final"]
+            options=["approve_plan", "modify_plan", "skip_to_final"],
+            tenant_id=state.get("tenant_id"),
         )
 
         state["approval_request_id"] = request.request_id
@@ -1363,7 +1820,8 @@ class InvoiceCollectionWorkflow(WorkflowTemplate):
                 "customer_id": state.get("customer_id")
             },
             options=["continue_collection", "forgive_debt", "send_to_collections"],
-            timeout_minutes=1440  # 24 hours
+            timeout_minutes=1440,  # 24 hours
+            tenant_id=state.get("tenant_id"),
         )
 
         state["approval_request_id"] = request.request_id
@@ -1762,7 +2220,8 @@ class LeadQualificationWorkflow(WorkflowTemplate):
                 "timeline": state.get("timeline")
             },
             options=["qualify_sql", "qualify_mql", "disqualify"],
-            timeout_minutes=480  # 8 hours
+            timeout_minutes=480,  # 8 hours
+            tenant_id=state.get("tenant_id"),
         )
 
         state["approval_request_id"] = request.request_id
@@ -2053,7 +2512,8 @@ class SystemHealingWorkflow(WorkflowTemplate):
                 "attempted_fixes": state.get("attempted_fixes")
             },
             options=["manual_fix_applied", "retry_auto_fix", "accept_degraded"],
-            timeout_minutes=30
+            timeout_minutes=30,
+            tenant_id=state.get("tenant_id"),
         )
 
         state["approval_request_id"] = request.request_id
@@ -2184,7 +2644,8 @@ class AdvancedWorkflowEngine:
         template = template_class(
             checkpoint_saver=self.checkpoint_saver,
             hitl_manager=self.hitl_manager,
-            ooda_executor=self.ooda_executor
+            ooda_executor=self.ooda_executor,
+            workflow_registry=self._templates,
         )
 
         # Execute workflow
@@ -2207,7 +2668,11 @@ class AdvancedWorkflowEngine:
             return {"error": "Engine not initialized", "status": "failed"}
 
         # Load checkpoint
-        checkpoint = await self.checkpoint_saver.load_checkpoint(workflow_id)
+        tenant_hint = (additional_state or {}).get("tenant_id")
+        checkpoint = await self.checkpoint_saver.load_checkpoint(
+            workflow_id,
+            tenant_id=tenant_hint,
+        )
         if not checkpoint:
             return {
                 "error": f"No checkpoint found for workflow: {workflow_id}",
@@ -2231,7 +2696,8 @@ class AdvancedWorkflowEngine:
         template = template_class(
             checkpoint_saver=self.checkpoint_saver,
             hitl_manager=self.hitl_manager,
-            ooda_executor=self.ooda_executor
+            ooda_executor=self.ooda_executor,
+            workflow_registry=self._templates,
         )
 
         result = await template.execute(
@@ -2258,14 +2724,21 @@ class AdvancedWorkflowEngine:
             return {"error": "Approval request not found", "success": False}
 
         # Submit the response
-        success = await self.hitl_manager.submit_approval(request_id, response, responded_by)
+        success = await self.hitl_manager.submit_approval(
+            request_id,
+            response,
+            responded_by,
+        )
 
         if success:
             # Update workflow state with the decision
-            checkpoint = await self.checkpoint_saver.load_checkpoint(request.workflow_id)
+            checkpoint = await self.checkpoint_saver.load_checkpoint(
+                request.workflow_id,
+                tenant_id=request.context.get("tenant_id") if isinstance(request.context, dict) else None,
+            )
             if checkpoint:
                 state = checkpoint.state_data
-                state["metadata"]["human_decision"] = response
+                state.setdefault("metadata", {})["human_decision"] = response
                 state["approval_status"] = HumanApprovalStatus.APPROVED.value if response == "approve" else HumanApprovalStatus.REJECTED.value
                 state["requires_approval"] = False
 
@@ -2273,7 +2746,8 @@ class AdvancedWorkflowEngine:
                     request.workflow_id,
                     checkpoint.workflow_type,
                     state,
-                    checkpoint.current_node
+                    checkpoint.current_node,
+                    tenant_id=state.get("tenant_id"),
                 )
 
         return {
@@ -2341,7 +2815,8 @@ class AdvancedWorkflowEngine:
                 "type": name,
                 "breakpoints": cls(
                     checkpoint_saver=self.checkpoint_saver,
-                    hitl_manager=self.hitl_manager
+                    hitl_manager=self.hitl_manager,
+                    workflow_registry=self._templates,
                 ).get_breakpoints()
             }
             for name, cls in self._templates.items()

@@ -64,6 +64,21 @@ REASONING_GUARD_FAIL_OPEN = os.getenv("REASONING_GUARD_FAIL_OPEN", "false").lowe
 )
 
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Return whether an environment-variable feature flag is enabled."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_MULTI_AGENT_COLLABORATION = _env_flag("ENABLE_MULTI_AGENT_COLLABORATION", False)
+ENABLE_AGENT_CAPABILITY_ROUTING = _env_flag("ENABLE_AGENT_CAPABILITY_ROUTING", False)
+ENABLE_AGENT_EXECUTION_BUDGETS = _env_flag("ENABLE_AGENT_EXECUTION_BUDGETS", False)
+ENABLE_AGENT_RESULT_AGGREGATION = _env_flag("ENABLE_AGENT_RESULT_AGGREGATION", False)
+ENABLE_LANGCHAIN_CHAIN_PATTERNS = _env_flag("ENABLE_LANGCHAIN_CHAIN_PATTERNS", False)
+
+
 def _handle_optional_import(feature: str, exc: Exception) -> None:
     if STRICT_STARTUP:
         raise RuntimeError(f"{feature} failed to load in strict mode: {exc}") from exc
@@ -166,6 +181,15 @@ try:
 except Exception as exc:
     LANGGRAPH_AVAILABLE = False
     _handle_optional_import("LangGraph", exc)
+
+try:
+    from langchain_enhancements import LangChainEnhancementRuntime
+
+    LANGCHAIN_ENHANCEMENTS_AVAILABLE = True
+except Exception as exc:
+    LANGCHAIN_ENHANCEMENTS_AVAILABLE = False
+    LangChainEnhancementRuntime = None
+    _handle_optional_import("LangChain enhancements", exc)
 
 from config import config
 
@@ -469,6 +493,14 @@ class AgentExecutor:
         self.workflow_runner = None  # Lazy-initialized LangGraph runner
         self.self_awareness: Optional[SelfAwareness] = None
         self.graph_context_provider: Optional[GraphContextProvider] = None
+        self._capability_registry: dict[str, set[str]] = {}
+        self._capability_registry_updated_at: Optional[datetime] = None
+        self._langchain_runtime: Optional[LangChainEnhancementRuntime] = None
+        self._default_tenant_id = (
+            os.getenv("DEFAULT_TENANT_ID")
+            or os.getenv("TENANT_ID")
+            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+        )
         # Agents are loaded lazily on first execute()
 
     async def _ensure_agents_loaded(self) -> None:
@@ -606,6 +638,376 @@ class AgentExecutor:
         action_matches = any(keyword in action for keyword in high_stakes_keywords)
 
         return agent_matches or type_matches or action_matches
+
+    def _resolve_tenant_for_task(self, task: dict[str, Any]) -> str:
+        """Resolve tenant id for scoped orchestration queries."""
+        tenant_id = (task.get("tenant_id") or "").strip() if isinstance(task, dict) else ""
+        return tenant_id or self._default_tenant_id
+
+    def _infer_agent_capabilities(self, agent_name: str, agent: BaseAgent | None = None) -> set[str]:
+        """Infer capabilities for an agent using explicit declarations and naming heuristics."""
+        capabilities: set[str] = set()
+
+        if agent is not None:
+            declared = getattr(agent, "capabilities", None)
+            if isinstance(declared, (list, tuple, set)):
+                capabilities.update(str(item).strip().lower() for item in declared if item)
+            agent_type = getattr(agent, "type", None)
+            if isinstance(agent_type, str) and agent_type.strip():
+                capabilities.add(agent_type.strip().lower())
+
+        lowered = agent_name.lower()
+        keyword_map = {
+            "monitor": {"monitoring", "observability", "health"},
+            "workflow": {"workflow_orchestration", "automation"},
+            "deploy": {"deployment", "devops", "infrastructure"},
+            "devops": {"deployment", "devops", "infrastructure"},
+            "invoice": {"billing", "collections", "payments"},
+            "payment": {"billing", "payments"},
+            "proposal": {"proposal_generation", "estimation"},
+            "estimate": {"proposal_generation", "estimation"},
+            "lead": {"lead_qualification", "lead_scoring", "prospecting"},
+            "content": {"content_generation", "marketing"},
+            "outreach": {"outreach", "marketing"},
+            "quality": {"quality_assurance", "testing"},
+            "selfbuilder": {"meta_programming", "automation"},
+        }
+        for token, inferred in keyword_map.items():
+            if token in lowered:
+                capabilities.update(inferred)
+
+        capabilities.add(lowered)
+        return {cap for cap in capabilities if cap}
+
+    async def _build_capability_registry(self, tenant_id: str) -> dict[str, set[str]]:
+        """Build capability registry from in-memory agents and ai_agents capabilities."""
+        if (
+            self._capability_registry
+            and self._capability_registry_updated_at
+            and (datetime.now(timezone.utc) - self._capability_registry_updated_at).total_seconds() < 60
+        ):
+            return self._capability_registry
+
+        registry: dict[str, set[str]] = {}
+
+        for agent_name, agent in self.agents.items():
+            registry[agent_name] = self._infer_agent_capabilities(agent_name, agent)
+
+        try:
+            tenant_pool = get_tenant_pool(tenant_id)
+            conn = await tenant_pool.acquire()
+            try:
+                rows = await conn.fetch(
+                    """
+                    SELECT name, capabilities
+                    FROM ai_agents
+                    WHERE status = 'active'
+                    """
+                )
+            finally:
+                await tenant_pool.release(conn)
+
+            for row in rows:
+                agent_name = str(row["name"] or "").strip()
+                if not agent_name:
+                    continue
+                raw_capabilities = row["capabilities"]
+                if isinstance(raw_capabilities, str):
+                    try:
+                        raw_capabilities = json.loads(raw_capabilities)
+                    except Exception:
+                        raw_capabilities = []
+                if not isinstance(raw_capabilities, list):
+                    raw_capabilities = []
+                existing = registry.get(agent_name, set())
+                existing.update(
+                    str(item).strip().lower()
+                    for item in raw_capabilities
+                    if isinstance(item, (str, int, float)) and str(item).strip()
+                )
+                existing.update(self._infer_agent_capabilities(agent_name))
+                registry[agent_name] = existing
+        except Exception as exc:
+            logger.warning("Capability registry DB sync failed: %s", exc)
+
+        self._capability_registry = registry
+        self._capability_registry_updated_at = datetime.now(timezone.utc)
+        return registry
+
+    def _extract_required_capabilities(self, task: dict[str, Any]) -> set[str]:
+        """Extract capability requirements from task payload."""
+        required: set[str] = set()
+
+        raw_caps = task.get("required_capabilities") or task.get("capabilities") or []
+        if isinstance(raw_caps, str):
+            raw_caps = [raw_caps]
+        if isinstance(raw_caps, (list, tuple, set)):
+            required.update(str(item).strip().lower() for item in raw_caps if str(item).strip())
+
+        action = str(task.get("action") or task.get("type") or "").lower()
+        for token in re.split(r"[^a-z0-9_]+", action):
+            if token:
+                required.add(token)
+
+        return required
+
+    async def _route_agent_by_capability(
+        self,
+        requested_agent_name: str,
+        task: dict[str, Any],
+    ) -> str:
+        """Route task to best matching agent based on capability registry."""
+        if not ENABLE_AGENT_CAPABILITY_ROUTING:
+            return requested_agent_name
+        if task.get("_skip_capability_routing"):
+            return requested_agent_name
+
+        required = self._extract_required_capabilities(task)
+        if not required:
+            return requested_agent_name
+
+        registry = await self._build_capability_registry(self._resolve_tenant_for_task(task))
+        if not registry:
+            return requested_agent_name
+
+        scored: list[tuple[str, int]] = []
+        for agent_name, capabilities in registry.items():
+            score = len(required.intersection(capabilities))
+            if score > 0:
+                scored.append((agent_name, score))
+
+        if not scored:
+            return requested_agent_name
+
+        scored.sort(key=lambda item: item[1], reverse=True)
+        best_agent = scored[0][0]
+
+        if best_agent != requested_agent_name:
+            logger.info(
+                "Capability routing selected %s over %s for required=%s",
+                best_agent,
+                requested_agent_name,
+                sorted(required),
+            )
+        return best_agent
+
+    def _estimate_task_tokens(self, task: dict[str, Any]) -> int:
+        """Estimate token consumption from task payload size."""
+        try:
+            payload = json.dumps(task, default=str)
+        except Exception:
+            payload = str(task)
+        return max(1, len(payload) // 4)
+
+    def _resolve_execution_budget(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Resolve execution token/time budgets for a task."""
+        default_time_budget = float(os.getenv("AGENT_EXECUTION_TIME_BUDGET_SECONDS", "120"))
+        default_token_budget = int(os.getenv("AGENT_EXECUTION_TOKEN_BUDGET", "4000"))
+        return {
+            "time_budget_seconds": float(
+                task.get("execution_time_budget_seconds")
+                or task.get("time_budget_seconds")
+                or default_time_budget
+            ),
+            "token_budget": int(task.get("token_budget") or default_token_budget),
+        }
+
+    async def _execute_single_agent_with_budget(
+        self,
+        agent_name: str,
+        task: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute a single agent with optional execution budget enforcement."""
+        agent = self.agents.get(agent_name)
+        if agent is None:
+            raise RuntimeError(f"Agent '{agent_name}' is not implemented and no fallback is allowed.")
+
+        if not ENABLE_AGENT_EXECUTION_BUDGETS:
+            result = await agent.execute(task)
+            return result if isinstance(result, dict) else {"status": "completed", "result": result}
+
+        budget = self._resolve_execution_budget(task)
+        estimated_tokens = self._estimate_task_tokens(task)
+        if estimated_tokens > budget["token_budget"]:
+            return {
+                "status": "failed",
+                "error": "execution_token_budget_exceeded",
+                "estimated_tokens": estimated_tokens,
+                "token_budget": budget["token_budget"],
+                "agent": agent_name,
+            }
+
+        time_budget_seconds = max(1.0, float(budget["time_budget_seconds"]))
+        try:
+            result = await asyncio.wait_for(agent.execute(task), timeout=time_budget_seconds)
+            normalized = result if isinstance(result, dict) else {"status": "completed", "result": result}
+            normalized.setdefault("execution_budget", {})
+            normalized["execution_budget"].update(
+                {
+                    "time_budget_seconds": time_budget_seconds,
+                    "token_budget": budget["token_budget"],
+                    "estimated_tokens": estimated_tokens,
+                }
+            )
+            return normalized
+        except asyncio.TimeoutError:
+            return {
+                "status": "failed",
+                "error": "execution_time_budget_exceeded",
+                "time_budget_seconds": time_budget_seconds,
+                "agent": agent_name,
+            }
+
+    def _aggregate_collaboration_results(
+        self,
+        results: list[dict[str, Any]],
+        strategy: str,
+    ) -> dict[str, Any]:
+        """Aggregate multi-agent results using the requested strategy."""
+        if not ENABLE_AGENT_RESULT_AGGREGATION:
+            strategy = "list"
+
+        successful = [item for item in results if item.get("status") not in {"failed", "error"}]
+        failed = [item for item in results if item.get("status") in {"failed", "error"}]
+
+        if strategy == "first_success":
+            best = successful[0] if successful else (results[0] if results else {})
+            return {
+                "strategy": strategy,
+                "selected_result": best,
+                "successful_agents": [item.get("agent") for item in successful],
+                "failed_agents": [item.get("agent") for item in failed],
+            }
+
+        if strategy == "merge_dict":
+            merged: dict[str, Any] = {}
+            for item in successful:
+                payload = item.get("result")
+                if isinstance(payload, dict):
+                    merged.update(payload)
+            return {
+                "strategy": strategy,
+                "merged_result": merged,
+                "successful_agents": [item.get("agent") for item in successful],
+                "failed_agents": [item.get("agent") for item in failed],
+            }
+
+        return {
+            "strategy": "list",
+            "results": results,
+            "successful_agents": [item.get("agent") for item in successful],
+            "failed_agents": [item.get("agent") for item in failed],
+        }
+
+    async def _execute_with_orchestration(
+        self,
+        requested_agent_name: str,
+        task: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Execute with capability routing, delegation, and aggregation when enabled."""
+        routed_agent = await self._route_agent_by_capability(requested_agent_name, task)
+
+        collaboration_requested = bool(
+            task.get("multi_agent")
+            or task.get("collaborative")
+            or task.get("delegation_plan")
+            or task.get("delegate_to")
+        )
+
+        if not (ENABLE_MULTI_AGENT_COLLABORATION and collaboration_requested):
+            return await self._execute_single_agent_with_budget(routed_agent, task)
+
+        delegation_plan = task.get("delegation_plan")
+        collaborator_names: list[str] = []
+        if isinstance(task.get("delegate_to"), (list, tuple, set)):
+            collaborator_names.extend(str(item) for item in task["delegate_to"] if item)
+        if routed_agent not in collaborator_names:
+            collaborator_names.insert(0, routed_agent)
+
+        if isinstance(delegation_plan, list):
+            plan_items: list[dict[str, Any]] = []
+            for item in delegation_plan:
+                if not isinstance(item, dict):
+                    continue
+                delegated_agent = str(item.get("agent") or routed_agent)
+                delegated_task = dict(task)
+                delegated_task.update(item.get("task") if isinstance(item.get("task"), dict) else {})
+                delegated_task["_skip_multi_agent"] = True
+                delegated_task["_skip_langchain_runtime"] = True
+                delegated_task["_delegated_from"] = requested_agent_name
+                plan_items.append({"agent": delegated_agent, "task": delegated_task})
+        else:
+            if not collaborator_names:
+                collaborator_names = [routed_agent]
+            plan_items = []
+            for collaborator in collaborator_names:
+                delegated_task = dict(task)
+                delegated_task["_skip_multi_agent"] = True
+                delegated_task["_skip_langchain_runtime"] = True
+                delegated_task["_delegated_from"] = requested_agent_name
+                plan_items.append({"agent": collaborator, "task": delegated_task})
+
+        if not plan_items:
+            delegated_task = dict(task)
+            delegated_task["_skip_multi_agent"] = True
+            delegated_task["_skip_langchain_runtime"] = True
+            delegated_task["_delegated_from"] = requested_agent_name
+            plan_items = [{"agent": routed_agent, "task": delegated_task}]
+
+        max_concurrency = max(
+            1,
+            int(task.get("max_collaborators") or os.getenv("AGENT_COLLABORATION_MAX_CONCURRENCY", "4")),
+        )
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        async def _run_plan_item(item: dict[str, Any]) -> dict[str, Any]:
+            agent_name = item["agent"]
+            delegated_task = item["task"]
+            async with semaphore:
+                result = await self._execute_single_agent_with_budget(agent_name, delegated_task)
+            return {
+                "agent": agent_name,
+                "status": result.get("status", "completed") if isinstance(result, dict) else "completed",
+                "result": result,
+            }
+
+        execution_results = await asyncio.gather(*[_run_plan_item(item) for item in plan_items])
+        aggregation_strategy = str(task.get("aggregation_strategy") or "merge_dict")
+        aggregated = self._aggregate_collaboration_results(execution_results, aggregation_strategy)
+
+        if isinstance(aggregated.get("selected_result"), dict):
+            selected_result = aggregated["selected_result"].get("result")
+        else:
+            selected_result = aggregated.get("merged_result", aggregated.get("results"))
+
+        return {
+            "status": "completed" if aggregated.get("successful_agents") else "failed",
+            "collaboration": {
+                "requested_agent": requested_agent_name,
+                "routed_agent": routed_agent,
+                "strategy": aggregation_strategy,
+                "delegations": len(plan_items),
+            },
+            "result": selected_result,
+            "aggregation": aggregated,
+            "_orchestration": {
+                "capability_routing_enabled": ENABLE_AGENT_CAPABILITY_ROUTING,
+                "multi_agent_enabled": ENABLE_MULTI_AGENT_COLLABORATION,
+                "execution_budgets_enabled": ENABLE_AGENT_EXECUTION_BUDGETS,
+            },
+        }
+
+    def _get_langchain_runtime(self) -> Optional[LangChainEnhancementRuntime]:
+        """Lazily initialize LangChain enhancement runtime."""
+        if not LANGCHAIN_ENHANCEMENTS_AVAILABLE:
+            return None
+        if self._langchain_runtime is None:
+            try:
+                self._langchain_runtime = LangChainEnhancementRuntime(self)
+            except Exception as exc:
+                logger.warning("LangChain runtime initialization failed: %s", exc)
+                self._langchain_runtime = None
+        return self._langchain_runtime
 
     def _redact_sensitive(self, payload: Any) -> Any:
         """Redact obvious secrets before sending to reasoning guard or audits."""
@@ -1232,6 +1634,25 @@ class AgentExecutor:
             )
         return self.workflow_runner
 
+    def get_langchain_tools(self, include_agents: Optional[list[str]] = None) -> list[Any]:
+        """Return LangChain-compatible tool wrappers for registered agents."""
+        runtime = self._get_langchain_runtime()
+        if not runtime:
+            return []
+        return runtime.get_tools(include_agents=include_agents)
+
+    async def execute_langchain_pattern(
+        self,
+        pattern: str,
+        task: dict[str, Any],
+        default_agent: str,
+    ) -> dict[str, Any]:
+        """Execute a LangChain composition pattern through the enhancement runtime."""
+        runtime = self._get_langchain_runtime()
+        if not runtime or not runtime.enabled():
+            return {"status": "skipped", "reason": "langchain_runtime_disabled"}
+        return await runtime.run_chain_pattern(pattern=pattern, task=task, default_agent=default_agent)
+
     async def _log_ai_agent_execution_start(
         self,
         execution_id: str,
@@ -1679,6 +2100,46 @@ class AgentExecutor:
                     "critique": reasoning_result.get("critique"),
                 }
 
+        # Optional LangChain chain composition (research -> analyze -> act patterns)
+        if (
+            ENABLE_LANGCHAIN_CHAIN_PATTERNS
+            and not task.get("_skip_langchain_runtime")
+            and task.get("langchain_pattern")
+        ):
+            runtime = self._get_langchain_runtime()
+            if runtime and runtime.enabled():
+                await exec_logger.log_phase(
+                    "langchain_chain",
+                    {
+                        "pattern": task.get("langchain_pattern"),
+                    },
+                )
+                chain_result = await runtime.run_chain_pattern(
+                    pattern=str(task.get("langchain_pattern")),
+                    task=task,
+                    default_agent=agent_name,
+                )
+                if isinstance(chain_result, dict) and chain_result.get("status") != "skipped":
+                    total_duration_ms = (
+                        datetime.now(timezone.utc) - execution_start
+                    ).total_seconds() * 1000
+                    if not skip_db_log:
+                        await exec_logger.log_completed(chain_result, total_duration_ms)
+                        await self._log_ai_agent_execution_end(
+                            execution_id,
+                            agent_name,
+                            task_type,
+                            task,
+                            chain_result,
+                            "failed"
+                            if chain_result.get("status") in ("failed", "error")
+                            else "completed",
+                            total_duration_ms,
+                            chain_result.get("error"),
+                        )
+                        end_logged = True
+                    return chain_result
+
         # Optional LangGraph workflow with review/quality loops
         if LANGGRAPH_AVAILABLE and (
             task.get("use_langgraph") or task.get("enable_review_loop") or task.get("quality_gate")
@@ -1869,10 +2330,17 @@ class AgentExecutor:
                 attempt_start = datetime.now(timezone.utc)
                 try:
                     if resolved_agent_name in self.agents:
-                        result = await self.agents[resolved_agent_name].execute(task)
+                        result = await self._execute_with_orchestration(
+                            requested_agent_name=resolved_agent_name,
+                            task=task,
+                        )
+                        if not isinstance(result, dict):
+                            result = {"status": "completed", "result": result}
                         # Add metadata about resolution
                         result["_original_agent"] = original_agent_name
-                        result["_resolved_agent"] = resolved_agent_name
+                        result["_resolved_agent"] = result.get("collaboration", {}).get(
+                            "routed_agent", resolved_agent_name
+                        )
                     else:
                         raise RuntimeError(
                             f"Agent '{agent_name}' is not implemented and no fallback is allowed."
@@ -2616,6 +3084,16 @@ class LangGraphWorkflowRunner:
                 state["selected_agent"] = requested_agent
         else:
             state["selected_agent"] = requested_agent
+
+        if ENABLE_AGENT_CAPABILITY_ROUTING:
+            try:
+                capability_routed = await self.executor._route_agent_by_capability(
+                    state["selected_agent"], state["task"]
+                )
+                state["metadata"]["capability_routed_agent"] = capability_routed
+                state["selected_agent"] = capability_routed
+            except Exception as exc:
+                logger.warning("Capability routing in workflow runner failed: %s", exc)
 
         return state
 

@@ -102,7 +102,7 @@ async def get_operator_status() -> dict[str, Any]:
 
 @router.post("/execute-plan")
 async def execute_plan(
-    plan_type: str = Query(..., enum=["enrich_all", "draft_outreach", "draft_proposals"]),
+    plan_type: str = Query(..., enum=["enrich_all", "draft_outreach", "draft_proposals", "full_lifecycle"]),
     limit: int = Query(default=10, le=50),
     approved_by: str = Query(default="api")
 ) -> dict[str, Any]:
@@ -113,6 +113,7 @@ async def execute_plan(
     - enrich_all: Enrich all unenriched real leads
     - draft_outreach: Draft outreach for enriched leads
     - draft_proposals: Draft proposals for qualified leads
+    - full_lifecycle: Execute discovery->scoring->nurture->proposal->invoice->payment retries
 
     All actions respect daily limits and kill switches.
     """
@@ -192,5 +193,21 @@ async def execute_plan(
     elif plan_type == "draft_proposals":
         return await operator.auto_draft_proposals(limit)
 
+    elif plan_type == "full_lifecycle":
+        return await operator.run_full_lifecycle(limit=limit, auto_send_outreach=False)
+
     else:
         raise HTTPException(status_code=400, detail=f"Unknown plan: {plan_type}")
+
+
+@router.post("/run-full-lifecycle")
+async def run_full_lifecycle(
+    limit: int = Query(default=25, ge=1, le=100),
+    auto_send_outreach: bool = Query(default=False),
+) -> dict[str, Any]:
+    """
+    Execute the full lead lifecycle pipeline in sequence:
+    discovery -> scoring -> nurture -> proposal -> close support -> invoice -> payment retry.
+    """
+    operator = get_revenue_operator()
+    return await operator.run_full_lifecycle(limit=limit, auto_send_outreach=auto_send_outreach)

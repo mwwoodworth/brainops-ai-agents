@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from campaign_manager import (
     get_campaign,
@@ -51,6 +51,16 @@ class WebsiteDiscoveryInput(BaseModel):
     websites: list[str]
     building_type: Optional[str] = None
     city: Optional[str] = None
+
+
+class EnrollLeadInput(BaseModel):
+    campaign_id: str
+    lead_id: str
+
+
+class BatchEnrollInput(BaseModel):
+    campaign_id: str
+    limit: int = Field(default=50, ge=1, le=200)
 
 
 # ---- Campaign info endpoints ----
@@ -221,6 +231,18 @@ async def discover_from_websites(campaign_id: str, payload: WebsiteDiscoveryInpu
 
 
 # ---- Outreach enrollment ----
+
+@router.post("/enroll")
+async def enroll_lead(payload: EnrollLeadInput) -> dict[str, Any]:
+    """Compatibility alias for enrolling one lead into a campaign."""
+    return await enroll_lead_in_outreach(payload.campaign_id, payload.lead_id)
+
+
+@router.post("/batch-enroll")
+async def batch_enroll(payload: BatchEnrollInput) -> dict[str, Any]:
+    """Compatibility alias for batch enrolling leads into a campaign."""
+    return await batch_enroll_outreach(payload.campaign_id, payload.limit)
+
 
 @router.post("/{campaign_id}/outreach/enroll/{lead_id}")
 async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, Any]:

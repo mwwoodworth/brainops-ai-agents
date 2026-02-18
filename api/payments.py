@@ -38,6 +38,22 @@ class MarkPaidRequest(BaseModel):
     verified_by: str
 
 
+class CapturePaymentRequest(BaseModel):
+    """Capture full or partial payment for an invoice."""
+    amount: Optional[float] = None
+    payment_method: str = "manual"
+    payment_reference: Optional[str] = None
+    verified_by: str = "system"
+
+
+class PaymentPlanRequest(BaseModel):
+    """Configure installment rules for an invoice."""
+    installment_count: int
+    interval_days: int = 30
+    min_installment_amount: Optional[float] = None
+    configured_by: str = "system"
+
+
 @router.on_event("startup")
 async def startup():
     """Ensure invoices table exists on startup."""
@@ -143,9 +159,9 @@ async def mark_invoice_paid(
     Use only when payment has been verified.
     """
     pc = get_payment_capture()
-
-    success, message = await pc.mark_paid(
+    success, message = await pc.capture_payment(
         invoice_id,
+        amount=None,
         payment_method=request.payment_method,
         payment_reference=request.payment_reference,
         verified_by=request.verified_by
@@ -161,6 +177,74 @@ async def mark_invoice_paid(
         "status": "paid",
         "note": "REAL REVENUE CAPTURED. Lead state updated to PAID."
     }
+
+
+@router.post("/invoice/{invoice_id}/capture")
+async def capture_invoice_payment(
+    invoice_id: str,
+    request: CapturePaymentRequest,
+) -> dict[str, Any]:
+    """
+    Capture payment for an invoice (full or partial).
+    """
+    pc = get_payment_capture()
+    success, message = await pc.capture_payment(
+        invoice_id=invoice_id,
+        amount=request.amount,
+        payment_method=request.payment_method,
+        payment_reference=request.payment_reference,
+        verified_by=request.verified_by,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "amount": request.amount,
+        "message": message,
+    }
+
+
+@router.post("/invoice/{invoice_id}/payment-plan")
+async def configure_invoice_payment_plan(
+    invoice_id: str,
+    request: PaymentPlanRequest,
+) -> dict[str, Any]:
+    """
+    Configure payment plan enforcement rules for an invoice.
+    """
+    pc = get_payment_capture()
+    success, message = await pc.configure_payment_plan(
+        invoice_id=invoice_id,
+        installment_count=request.installment_count,
+        interval_days=request.interval_days,
+        min_installment_amount=request.min_installment_amount,
+        configured_by=request.configured_by,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {
+        "success": True,
+        "invoice_id": invoice_id,
+        "message": message,
+        "plan": request.model_dump(),
+    }
+
+
+@router.post("/invoices/retry-outstanding")
+async def retry_outstanding_invoices(
+    max_invoices: int = Query(default=25, ge=1, le=250),
+    include_not_due: bool = Query(default=False),
+) -> dict[str, Any]:
+    """
+    Retry collection for outstanding invoices and queue reminders.
+    """
+    pc = get_payment_capture()
+    return await pc.retry_outstanding_payments(
+        max_invoices=max_invoices,
+        include_not_due=include_not_due,
+    )
 
 
 @router.get("/invoice/{invoice_id}")

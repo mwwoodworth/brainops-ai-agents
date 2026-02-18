@@ -11,6 +11,7 @@ Part of Revenue Perfection Session - Total Completion Protocol.
 """
 
 import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -87,6 +88,23 @@ LEGACY_STAGE_MAP = {
 }
 
 
+DEFAULT_TRANSITION_TRIGGERS: dict[PipelineState, set[str]] = {
+    PipelineState.ENRICHED: {"enrichment_completed", "legacy_migration"},
+    PipelineState.CONTACT_READY: {"lead_qualified", "batch_advancement", "legacy_migration"},
+    PipelineState.OUTREACH_PENDING_APPROVAL: {"outreach_draft_submitted", "retry_outreach"},
+    PipelineState.OUTREACH_SENT: {"outreach_sent", "resend_outreach"},
+    PipelineState.REPLIED: {"reply_received", "meeting_request"},
+    PipelineState.MEETING_BOOKED: {"meeting_scheduled", "discovery_call_booked"},
+    PipelineState.PROPOSAL_DRAFTED: {"proposal_drafted", "proposal_revision"},
+    PipelineState.PROPOSAL_APPROVED: {"proposal_approved"},
+    PipelineState.PROPOSAL_SENT: {"proposal_sent"},
+    PipelineState.WON_INVOICE_PENDING: {"deal_won"},
+    PipelineState.INVOICED: {"invoice_created", "invoice_sent"},
+    PipelineState.PAID: {"payment_received_manual", "payment_received_stripe", "payment_received_stripe_invoice"},
+    PipelineState.LOST: {"deal_lost", "disqualified"},
+}
+
+
 @dataclass
 class StateTransition:
     """Represents a state transition event."""
@@ -119,6 +137,63 @@ class PipelineStateMachine:
         except Exception as e:
             logger.error(f"Failed to get database pool: {e}")
             return None
+
+    def _validate_trigger(self, to_state: PipelineState, trigger: str, force: bool) -> tuple[bool, str]:
+        """Validate trigger semantics for state transition integrity."""
+        if force:
+            return True, "Forced transition"
+
+        strict = (os.getenv("PIPELINE_STRICT_TRIGGER_VALIDATION", "true") or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        if not strict:
+            return True, "Trigger validation disabled"
+
+        allowed = DEFAULT_TRANSITION_TRIGGERS.get(to_state)
+        if not allowed:
+            return True, "No trigger constraints for target state"
+        if trigger in allowed:
+            return True, "Trigger accepted"
+        return False, (
+            f"Trigger '{trigger}' is not valid for state '{to_state.value}'. "
+            f"Allowed: {sorted(allowed)}"
+        )
+
+    async def _record_audit_event(
+        self,
+        lead_id: str,
+        action_data: dict[str, Any],
+        success: bool,
+        actor: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """Write additional audit event for transition attempts (success and failure)."""
+        pool = self._get_pool()
+        if not pool:
+            return
+        try:
+            payload = dict(action_data)
+            if error:
+                payload["error"] = error
+            await pool.execute(
+                """
+                INSERT INTO revenue_actions (
+                    id, lead_id, action_type, action_data, result, success, created_at, executed_by
+                ) VALUES ($1, $2, 'state_transition_audit', $3, $4, $5, $6, $7)
+                """,
+                uuid.uuid4(),
+                uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id,
+                payload,
+                {"status": "ok" if success else "failed"},
+                success,
+                datetime.now(timezone.utc),
+                actor,
+            )
+        except Exception as exc:
+            logger.debug("State transition audit logging skipped: %s", exc)
 
     async def get_lead_state(self, lead_id: str) -> Optional[str]:
         """Get current state of a lead from ledger."""
@@ -155,11 +230,17 @@ class PipelineStateMachine:
         if not current:
             return False, "Lead not found"
 
+        if current == to_state.value:
+            return True, f"Lead already in state {to_state.value}"
+
         try:
             current_state = PipelineState(current)
         except ValueError:
             # Legacy state, allow transition
             return True, "Legacy state migration allowed"
+
+        if current_state in {PipelineState.PAID, PipelineState.LOST}:
+            return False, f"Cannot transition from terminal state {current_state.value}"
 
         valid_next = VALID_TRANSITIONS.get(current_state, [])
         if to_state in valid_next:
@@ -198,9 +279,72 @@ class PipelineStateMachine:
         if not force:
             can_do, reason = await self.can_transition(lead_id, to_state)
             if not can_do:
+                await self._record_audit_event(
+                    lead_id=lead_id,
+                    action_data={
+                        "from_state": await self.get_lead_state(lead_id),
+                        "to_state": to_state.value,
+                        "trigger": trigger,
+                        "metadata": metadata or {},
+                    },
+                    success=False,
+                    actor=actor,
+                    error=reason,
+                )
                 return False, reason, None
 
         current_state = await self.get_lead_state(lead_id)
+        if current_state == to_state.value:
+            # Idempotent: no-op transition still gets audited for traceability.
+            await self._record_audit_event(
+                lead_id=lead_id,
+                action_data={
+                    "from_state": current_state,
+                    "to_state": to_state.value,
+                    "trigger": trigger,
+                    "metadata": metadata or {},
+                    "idempotent": True,
+                },
+                success=True,
+                actor=actor,
+            )
+            transition = StateTransition(
+                id=str(uuid.uuid4()),
+                lead_id=lead_id,
+                from_state=current_state,
+                to_state=to_state.value,
+                trigger=trigger,
+                actor=actor,
+                metadata=metadata or {},
+                created_at=datetime.now(timezone.utc),
+            )
+            return True, f"Already in {to_state.value}", transition
+
+        trigger_ok, trigger_msg = self._validate_trigger(to_state, trigger, force=force)
+        if not trigger_ok:
+            await self._record_audit_event(
+                lead_id=lead_id,
+                action_data={
+                    "from_state": current_state,
+                    "to_state": to_state.value,
+                    "trigger": trigger,
+                    "metadata": metadata or {},
+                },
+                success=False,
+                actor=actor,
+                error=trigger_msg,
+            )
+            return False, trigger_msg, None
+
+        transition_count = await pool.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM revenue_actions
+            WHERE lead_id = $1
+              AND action_type = 'state_transition'
+            """,
+            uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id,
+        ) or 0
         transition_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
 
@@ -209,6 +353,7 @@ class PipelineStateMachine:
             "from_state": current_state,
             "to_state": to_state.value,
             "trigger": trigger,
+            "sequence": int(transition_count) + 1,
             "metadata": metadata or {}
         }
 
@@ -235,7 +380,19 @@ class PipelineStateMachine:
                 WHERE id = $3
             """, legacy_stage, now, uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id)
 
-            logger.info(f"Lead {lead_id[:8]}... transitioned: {current_state} -> {to_state.value} by {actor}")
+            logger.info(
+                "Lead %s... transitioned: %s -> %s by %s",
+                str(lead_id)[:8],
+                current_state,
+                to_state.value,
+                actor,
+            )
+            await self._record_audit_event(
+                lead_id=lead_id,
+                action_data=action_data,
+                success=True,
+                actor=actor,
+            )
 
             # Phase 2: Revenue reinforcement
             # Best-effort: when a lead reaches late-stage conversion states, ask the optimizer to recompile.
@@ -274,6 +431,13 @@ class PipelineStateMachine:
 
         except Exception as e:
             logger.error(f"Transition failed: {e}")
+            await self._record_audit_event(
+                lead_id=lead_id,
+                action_data=action_data,
+                success=False,
+                actor=actor,
+                error=str(e),
+            )
             return False, str(e), None
 
     def _to_legacy_stage(self, state: PipelineState) -> str:

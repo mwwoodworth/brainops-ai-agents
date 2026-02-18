@@ -25,6 +25,23 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.getenv(name) or "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+ENABLE_PARTIAL_PAYMENTS = _env_flag("PAYMENT_CAPTURE_ENABLE_PARTIAL_PAYMENTS", "true")
+ENABLE_PAYMENT_RETRY = _env_flag("PAYMENT_CAPTURE_ENABLE_RETRY", "true")
+ENABLE_PAYMENT_PLAN_ENFORCEMENT = _env_flag("PAYMENT_CAPTURE_ENFORCE_PLAN", "true")
+PAYMENT_RETRY_MAX_ATTEMPTS = max(1, _env_int("PAYMENT_CAPTURE_RETRY_ATTEMPTS", 3))
+
 def resolve_stripe_secret_key_with_source() -> tuple[str, str]:
     """
     Resolve the Stripe secret key from the environment.
@@ -102,6 +119,157 @@ class PaymentCapture:
             self._stripe.api_key = key
             self._stripe_key = key
         return self._stripe
+
+    @staticmethod
+    def _to_uuid(value: str | uuid.UUID) -> uuid.UUID:
+        if isinstance(value, uuid.UUID):
+            return value
+        return uuid.UUID(str(value))
+
+    async def _get_invoice_row(self, invoice_id: str) -> Optional[dict[str, Any]]:
+        pool = self._get_pool()
+        if not pool:
+            return None
+        row = await pool.fetchrow(
+            """
+            SELECT i.*, rl.email AS client_email
+            FROM ai_invoices i
+            LEFT JOIN revenue_leads rl ON i.lead_id = rl.id
+            WHERE i.id = $1
+            """,
+            self._to_uuid(invoice_id),
+        )
+        return dict(row) if row else None
+
+    async def _get_recorded_payment_total(self, invoice_id: str) -> Decimal:
+        """Calculate total captured amount from payment events."""
+        pool = self._get_pool()
+        if not pool:
+            return Decimal("0")
+
+        try:
+            raw = await pool.fetchval(
+                """
+                SELECT COALESCE(SUM((action_data->>'amount')::numeric), 0)
+                FROM revenue_actions
+                WHERE action_type = 'payment_event'
+                  AND action_data->>'invoice_id' = $1
+                """,
+                str(invoice_id),
+            )
+            return Decimal(str(raw or 0))
+        except Exception:
+            return Decimal("0")
+
+    async def _record_payment_event(
+        self,
+        invoice_id: str,
+        lead_id: str,
+        amount: Decimal,
+        payment_method: str,
+        payment_reference: Optional[str],
+        actor: str,
+        event: str = "captured",
+    ) -> None:
+        pool = self._get_pool()
+        if not pool:
+            return
+        try:
+            await pool.execute(
+                """
+                INSERT INTO revenue_actions (
+                    id, lead_id, action_type, action_data, result, success, created_at, executed_by
+                ) VALUES ($1, $2, 'payment_event', $3, $4, true, $5, $6)
+                """,
+                uuid.uuid4(),
+                self._to_uuid(lead_id),
+                {
+                    "invoice_id": str(invoice_id),
+                    "event": event,
+                    "amount": float(amount),
+                    "payment_method": payment_method,
+                    "payment_reference": payment_reference,
+                },
+                {"status": "recorded"},
+                datetime.now(timezone.utc),
+                actor,
+            )
+        except Exception as exc:
+            logger.debug("Payment event logging skipped for invoice %s: %s", invoice_id, exc)
+
+    async def _get_payment_plan(self, invoice_id: str) -> Optional[dict[str, Any]]:
+        """Fetch latest payment plan configuration for an invoice."""
+        pool = self._get_pool()
+        if not pool:
+            return None
+        try:
+            row = await pool.fetchrow(
+                """
+                SELECT action_data
+                FROM revenue_actions
+                WHERE action_type = 'payment_plan_config'
+                  AND action_data->>'invoice_id' = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                str(invoice_id),
+            )
+            if not row:
+                return None
+            plan = row.get("action_data")
+            if isinstance(plan, str):
+                plan = json.loads(plan)
+            return plan if isinstance(plan, dict) else None
+        except Exception:
+            return None
+
+    async def configure_payment_plan(
+        self,
+        invoice_id: str,
+        installment_count: int,
+        interval_days: int = 30,
+        min_installment_amount: Optional[float] = None,
+        configured_by: str = "system",
+    ) -> tuple[bool, str]:
+        """Attach a payment plan policy to an invoice."""
+        if installment_count < 2:
+            return False, "Installment count must be >= 2"
+        if interval_days < 1:
+            return False, "Interval days must be >= 1"
+
+        invoice = await self._get_invoice_row(invoice_id)
+        if not invoice:
+            return False, "Invoice not found"
+
+        total_amount = Decimal(str(invoice.get("amount") or 0))
+        min_installment = Decimal(str(min_installment_amount)) if min_installment_amount else (
+            total_amount / Decimal(str(installment_count))
+        )
+
+        pool = self._get_pool()
+        if not pool:
+            return False, "Database not available"
+
+        payload = {
+            "invoice_id": str(invoice_id),
+            "installment_count": int(installment_count),
+            "interval_days": int(interval_days),
+            "min_installment_amount": float(min_installment),
+            "configured_by": configured_by,
+        }
+        await pool.execute(
+            """
+            INSERT INTO revenue_actions (
+                id, lead_id, action_type, action_data, success, created_at, executed_by
+            ) VALUES ($1, $2, 'payment_plan_config', $3, true, $4, $5)
+            """,
+            uuid.uuid4(),
+            self._to_uuid(str(invoice["lead_id"])),
+            payload,
+            datetime.now(timezone.utc),
+            f"human:{configured_by}",
+        )
+        return True, "Payment plan configured"
 
     async def create_invoice(
         self,
@@ -338,46 +506,99 @@ BrainOps Team""",
         logger.info(f"Invoice {invoice_id[:8]}... sent to {invoice['client_email'][:3]}***")
         return True, "Invoice sent"
 
-    async def mark_paid(
+    async def capture_payment(
         self,
         invoice_id: str,
+        amount: Optional[float] = None,
         payment_method: str = "manual",
         payment_reference: Optional[str] = None,
-        verified_by: str = "system"
+        verified_by: str = "system",
     ) -> tuple[bool, str]:
         """
-        Mark an invoice as paid.
+        Capture a payment against an invoice.
 
-        This is the final step - leads to REAL REVENUE.
+        Supports partial capture when enabled via PAYMENT_CAPTURE_ENABLE_PARTIAL_PAYMENTS.
+        Enforces configured payment plan minimums when PAYMENT_CAPTURE_ENFORCE_PLAN is enabled.
         """
         pool = self._get_pool()
         if not pool:
             return False, "Database not available"
 
-        invoice = await pool.fetchrow("""
-            SELECT i.*, rl.email AS client_email
-            FROM ai_invoices i
-            LEFT JOIN revenue_leads rl ON i.lead_id = rl.id
-            WHERE i.id = $1
-        """, uuid.UUID(invoice_id))
-
+        invoice = await self._get_invoice_row(invoice_id)
         if not invoice:
             return False, "Invoice not found"
-
-        if invoice["status"] == "paid":
+        if invoice.get("status") == "paid":
             return False, "Invoice already marked as paid"
 
+        invoice_total = Decimal(str(invoice.get("amount") or 0))
+        total_paid_before = await self._get_recorded_payment_total(invoice_id)
+        outstanding = max(Decimal("0"), invoice_total - total_paid_before)
+        if outstanding <= Decimal("0"):
+            return False, "Invoice has no outstanding balance"
+
+        payment_amount = Decimal(str(amount)) if amount is not None else outstanding
+        if payment_amount <= 0:
+            return False, "Payment amount must be greater than 0"
+        if payment_amount > outstanding:
+            payment_amount = outstanding
+
+        if payment_amount < outstanding and not ENABLE_PARTIAL_PAYMENTS:
+            return False, "Partial payments are disabled by configuration"
+
+        plan = await self._get_payment_plan(invoice_id)
+        if ENABLE_PAYMENT_PLAN_ENFORCEMENT and plan:
+            min_installment = Decimal(str(plan.get("min_installment_amount") or 0))
+            if min_installment > 0 and payment_amount < min_installment:
+                return False, (
+                    f"Payment amount ${float(payment_amount):.2f} is below plan minimum "
+                    f"${float(min_installment):.2f}"
+                )
+
         now = datetime.now(timezone.utc)
+        actor = f"human:{verified_by}" if payment_method == "manual" else "system:payment_capture"
+        await self._record_payment_event(
+            invoice_id=invoice_id,
+            lead_id=str(invoice["lead_id"]),
+            amount=payment_amount,
+            payment_method=payment_method,
+            payment_reference=payment_reference,
+            actor=actor,
+            event="captured",
+        )
 
-        # Update invoice
-        await pool.execute("""
+        total_paid_after = min(invoice_total, total_paid_before + payment_amount)
+        remaining = max(Decimal("0"), invoice_total - total_paid_after)
+        fully_paid = remaining <= Decimal("0.0001")
+        new_status = "paid" if fully_paid else "partial"
+
+        await pool.execute(
+            """
             UPDATE ai_invoices
-            SET status = 'paid', paid_at = $1, updated_at = $1,
-                stripe_payment_intent = COALESCE(stripe_payment_intent, $2)
-            WHERE id = $3
-        """, now, payment_reference, uuid.UUID(invoice_id))
+            SET status = $1,
+                paid_at = CASE WHEN $1 = 'paid' THEN $2 ELSE paid_at END,
+                updated_at = $2,
+                stripe_payment_intent = COALESCE(stripe_payment_intent, $3)
+            WHERE id = $4
+            """,
+            new_status,
+            now,
+            payment_reference,
+            self._to_uuid(invoice_id),
+        )
 
-        # Update lead state to PAID - THIS IS REAL REVENUE
+        if not fully_paid:
+            logger.info(
+                "Partial payment captured for invoice %s: +$%.2f (remaining $%.2f)",
+                str(invoice_id)[:8],
+                float(payment_amount),
+                float(remaining),
+            )
+            return True, (
+                f"Partial payment recorded: ${float(payment_amount):.2f}. "
+                f"Remaining balance: ${float(remaining):.2f}"
+            )
+
+        # Update lead state to PAID - this is revenue-complete lifecycle closeout.
         from pipeline_state_machine import get_state_machine, PipelineState
         sm = get_state_machine()
         await sm.transition(
@@ -387,9 +608,10 @@ BrainOps Team""",
             actor=f"human:{verified_by}" if payment_method == "manual" else "system:stripe",
             metadata={
                 "invoice_id": invoice_id,
-                "amount": float(invoice["amount"]),
+                "amount": float(invoice_total),
                 "payment_method": payment_method,
-                "payment_reference": payment_reference
+                "payment_reference": payment_reference,
+                "partial_payment_count": 0 if total_paid_before == 0 else 1,
             }
         )
 
@@ -397,11 +619,12 @@ BrainOps Team""",
         revenue_date = now.date().isoformat()
         stripe_payment_id = payment_reference if payment_method.startswith("stripe") else None
         description = f"Invoice {invoice_id} paid via {payment_method}"
+        customer_email = invoice.get("client_email")
+        currency = invoice.get("currency") or "USD"
+        tenant_id = invoice.get("tenant_id")
 
-        customer_email = invoice["client_email"]
-        currency = invoice["currency"] or "USD"
-
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO real_revenue_tracking (
                 id,
                 tenant_id,
@@ -417,33 +640,33 @@ BrainOps Team""",
                 is_recurring,
                 metadata
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8, $9, $10, false, $11)
-        """,
+            """,
             uuid.uuid4(),
-            invoice["tenant_id"],
+            tenant_id,
             revenue_date,
             "proposal",
-            float(invoice["amount"]),
+            float(invoice_total),
             description,
             customer_email,
             stripe_payment_id,
             now,
             currency,
             json.dumps({
-                "invoice_id": invoice_id,
+                "invoice_id": str(invoice_id),
                 "lead_id": str(invoice["lead_id"]),
                 "payment_method": payment_method,
-                "payment_reference": payment_reference
-            })
+                "payment_reference": payment_reference,
+                "partial_payments_total": float(total_paid_after),
+            }),
         )
 
         # Phase 2: Revenue reinforcement
-        # Best-effort: queue a recompilation so outreach learns from real cash outcomes.
         try:
             from optimization.revenue_prompt_compile_queue import enqueue_revenue_prompt_compile_task
 
             await enqueue_revenue_prompt_compile_task(
                 pool=pool,
-                tenant_id=str(invoice.get("tenant_id") or "") or None,
+                tenant_id=str(tenant_id or "") or None,
                 lead_id=str(invoice.get("lead_id") or ""),
                 reason="real_revenue_tracking:invoice_paid",
                 priority=95,
@@ -452,8 +675,138 @@ BrainOps Team""",
         except Exception as exc:
             logger.debug("Revenue prompt compile enqueue skipped after payment: %s", exc)
 
-        logger.info(f"REAL REVENUE: Invoice {invoice_id[:8]}... marked PAID - ${float(invoice['amount']):.2f}")
-        return True, f"Payment confirmed. REAL REVENUE: ${float(invoice['amount']):.2f}"
+        logger.info(
+            "REAL REVENUE: Invoice %s marked PAID - $%.2f",
+            str(invoice_id)[:8],
+            float(invoice_total),
+        )
+        return True, f"Payment confirmed. REAL REVENUE: ${float(invoice_total):.2f}"
+
+    async def mark_paid(
+        self,
+        invoice_id: str,
+        payment_method: str = "manual",
+        payment_reference: Optional[str] = None,
+        verified_by: str = "system",
+    ) -> tuple[bool, str]:
+        """Backward-compatible full payment API."""
+        return await self.capture_payment(
+            invoice_id=invoice_id,
+            amount=None,
+            payment_method=payment_method,
+            payment_reference=payment_reference,
+            verified_by=verified_by,
+        )
+
+    async def retry_outstanding_payments(
+        self,
+        max_invoices: int = 25,
+        include_not_due: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Retry payment collection for outstanding invoices.
+
+        Strategy:
+        - Queue reminder emails
+        - Track retry attempts in revenue_actions
+        - Enforce max retries via PAYMENT_CAPTURE_RETRY_ATTEMPTS
+        """
+        if not ENABLE_PAYMENT_RETRY:
+            return {"status": "disabled", "reason": "PAYMENT_CAPTURE_ENABLE_RETRY=false"}
+
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        due_filter = "" if include_not_due else "AND i.due_date <= NOW()"
+        invoices = await pool.fetch(
+            f"""
+            SELECT i.id, i.lead_id, i.amount, i.due_date, i.status, p.client_email, p.client_name, p.offer_name
+            FROM ai_invoices i
+            LEFT JOIN ai_proposals p ON i.proposal_id = p.id
+            WHERE i.status IN ('pending', 'sent', 'partial')
+              {due_filter}
+            ORDER BY i.due_date ASC NULLS LAST, i.created_at ASC
+            LIMIT $1
+            """,
+            max(1, max_invoices),
+        )
+
+        now = datetime.now(timezone.utc)
+        retried = 0
+        skipped = 0
+        failed = 0
+
+        for invoice in invoices:
+            invoice_id = str(invoice["id"])
+            attempt_count = await pool.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM revenue_actions
+                WHERE action_type = 'payment_retry_attempt'
+                  AND action_data->>'invoice_id' = $1
+                """,
+                invoice_id,
+            ) or 0
+
+            if attempt_count >= PAYMENT_RETRY_MAX_ATTEMPTS:
+                skipped += 1
+                continue
+
+            try:
+                await pool.execute(
+                    """
+                    INSERT INTO revenue_actions (
+                        id, lead_id, action_type, action_data, success, created_at, executed_by
+                    ) VALUES ($1, $2, 'payment_retry_attempt', $3, true, $4, 'system:payment_capture_retry')
+                    """,
+                    uuid.uuid4(),
+                    invoice["lead_id"],
+                    {
+                        "invoice_id": invoice_id,
+                        "attempt": int(attempt_count) + 1,
+                        "due_date": invoice["due_date"].isoformat() if invoice["due_date"] else None,
+                    },
+                    now,
+                )
+
+                await pool.execute(
+                    """
+                    INSERT INTO ai_email_queue (id, recipient, subject, body, status, scheduled_for, created_at, metadata)
+                    VALUES ($1, $2, $3, $4, 'queued', $5, $5, $6::jsonb)
+                    """,
+                    uuid.uuid4(),
+                    invoice.get("client_email"),
+                    f"Payment reminder: Invoice {invoice_id[:8]}",
+                    (
+                        f"Hi {invoice.get('client_name') or 'there'},\n\n"
+                        f"This is a reminder for invoice {invoice_id[:8]} "
+                        f"(${float(invoice.get('amount') or 0):.2f}).\n"
+                        f"Please complete payment at your earliest convenience.\n\n"
+                        "If you need a payment plan, reply to this email."
+                    ),
+                    now,
+                    json.dumps(
+                        {
+                            "source": "payment_retry",
+                            "invoice_id": invoice_id,
+                            "attempt": int(attempt_count) + 1,
+                        }
+                    ),
+                )
+                retried += 1
+            except Exception as exc:
+                failed += 1
+                logger.warning("Payment retry failed for invoice %s: %s", invoice_id, exc)
+
+        return {
+            "status": "completed",
+            "max_attempts": PAYMENT_RETRY_MAX_ATTEMPTS,
+            "evaluated": len(invoices),
+            "retried": retried,
+            "skipped": skipped,
+            "failed": failed,
+        }
 
     async def handle_stripe_webhook(
         self,
@@ -525,10 +878,18 @@ BrainOps Team""",
             """
 
         row = await pool.fetchrow(query)
+        partial_collected = await pool.fetchval(
+            """
+            SELECT COALESCE(SUM((action_data->>'amount')::numeric), 0)
+            FROM revenue_actions
+            WHERE action_type = 'payment_event'
+            """
+        )
 
         return {
             "total_paid_invoices": row["total_paid"] if row else 0,
             "total_real_revenue": float(row["total_revenue"] or 0) if row else 0,
+            "total_collected_including_partials": float(partial_collected or 0),
             "data_mode": "REAL_ONLY" if real_only else "ALL_DATA"
         }
 

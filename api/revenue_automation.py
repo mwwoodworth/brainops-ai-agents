@@ -165,6 +165,19 @@ async def get_revenue_status():
         raise HTTPException(status_code=500, detail=f"Revenue system status error: {str(e)}")
 
 
+@router.get("/prompt-optimizer/status")
+async def get_prompt_optimizer_status() -> dict[str, Any]:
+    """Get the current revenue prompt optimizer status for this running instance."""
+    try:
+        from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+        optimizer = get_revenue_prompt_optimizer()
+        return {"success": True, "status": optimizer.status()}
+    except Exception as e:
+        logger.warning("Failed to read prompt optimizer status: %s", e)
+        return {"success": False, "error": str(e), "status": {"enabled": False}}
+
+
 @router.post("/leads/capture")
 async def capture_lead(request: LeadCaptureRequest, api_key: str = Depends(verify_api_key)):
     """Capture a new lead and start automation. Requires API key authentication."""
@@ -183,6 +196,12 @@ async def capture_lead(request: LeadCaptureRequest, api_key: str = Depends(verif
     except Exception as e:
         logger.error(f"Lead capture error: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/leads")
+async def create_lead(request: LeadCaptureRequest, api_key: str = Depends(verify_api_key)):
+    """Compatibility alias for creating/capturing a lead."""
+    return await capture_lead(request, api_key)
 
 
 @router.get("/leads")
