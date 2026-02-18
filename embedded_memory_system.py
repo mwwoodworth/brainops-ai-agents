@@ -26,6 +26,16 @@ from utils.embedding_provider import (
 
 logger = logging.getLogger(__name__)
 
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_EMBEDDED_MEMORY_IMPORTANCE_DECAY = _env_flag("ENABLE_EMBEDDED_MEMORY_IMPORTANCE_DECAY", "false")
+ENABLE_EMBEDDED_MEMORY_CONSOLIDATION = _env_flag("ENABLE_EMBEDDED_MEMORY_CONSOLIDATION", "false")
+ENABLE_EMBEDDED_WORKING_MEMORY = _env_flag("ENABLE_EMBEDDED_WORKING_MEMORY", "false")
+ENABLE_EMBEDDED_MEMORY_QUALITY_SCORING = _env_flag("ENABLE_EMBEDDED_MEMORY_QUALITY_SCORING", "false")
+
 class EmbeddedMemorySystem:
     """
     Local SQLite memory cache with RAG capabilities and master Postgres sync
@@ -49,6 +59,7 @@ class EmbeddedMemorySystem:
         self.sync_task = None
         self.last_sync = None
         self.initialized = False
+        self._last_decay_applied: datetime | None = None
 
     async def initialize(self):
         """Initialize local SQLite and master Postgres connections"""
@@ -197,6 +208,269 @@ class EmbeddedMemorySystem:
             logger.info("🔄 Local DB empty on first access, triggering sync...")
             await self.sync_from_master(force=True)
 
+    def _apply_importance_decay_if_needed(self) -> None:
+        """Apply periodic importance decay to keep old memories from dominating retrieval."""
+        if not ENABLE_EMBEDDED_MEMORY_IMPORTANCE_DECAY:
+            return
+        now = datetime.utcnow()
+        if self._last_decay_applied and (now - self._last_decay_applied).total_seconds() < 3600:
+            return
+        self.apply_importance_decay()
+        self._last_decay_applied = now
+
+    def apply_importance_decay(self, half_life_days: float = 30.0, floor: float = 0.05) -> dict[str, Any]:
+        """Decay memory importance scores based on age."""
+        if not self.sqlite_conn:
+            return {"status": "error", "error": "sqlite_unavailable"}
+
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, importance_score, created_at
+            FROM unified_ai_memory
+            WHERE importance_score IS NOT NULL
+            """
+        )
+        rows = cursor.fetchall()
+        updated = 0
+        now = datetime.utcnow()
+
+        for row in rows:
+            created_at = row["created_at"]
+            try:
+                created_dt = datetime.fromisoformat(str(created_at))
+            except Exception:
+                continue
+            age_days = max(0.0, (now - created_dt).total_seconds() / 86400.0)
+            old_score = float(row["importance_score"] or 0.0)
+            decay_factor = 0.5 ** (age_days / max(1.0, half_life_days))
+            new_score = max(floor, min(1.0, old_score * decay_factor))
+            if abs(new_score - old_score) < 0.01:
+                continue
+            cursor.execute(
+                """
+                UPDATE unified_ai_memory
+                SET importance_score = ?, metadata = COALESCE(metadata, '{}'), synced_at = NULL
+                WHERE id = ?
+                """,
+                (new_score, row["id"]),
+            )
+            updated += 1
+
+        self.sqlite_conn.commit()
+        return {"status": "completed", "updated": updated, "total": len(rows)}
+
+    def consolidate_similar_memories(
+        self,
+        similarity_threshold: float = 0.92,
+        max_pairs: int = 50,
+    ) -> dict[str, Any]:
+        """Merge near-duplicate local memories into refined records."""
+        if not ENABLE_EMBEDDED_MEMORY_CONSOLIDATION:
+            return {"status": "skipped", "reason": "ENABLE_EMBEDDED_MEMORY_CONSOLIDATION=false"}
+        if not self.sqlite_conn:
+            return {"status": "error", "error": "sqlite_unavailable"}
+
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, content, embedding, importance_score, metadata
+            FROM unified_ai_memory
+            WHERE embedding IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 300
+            """
+        )
+        rows = [dict(r) for r in cursor.fetchall()]
+        consolidated = 0
+        visited: set[str] = set()
+
+        for i, base in enumerate(rows):
+            if consolidated >= max_pairs:
+                break
+            if base["id"] in visited:
+                continue
+            base_vec = self._decode_embedding(base.get("embedding"))
+            if base_vec is None:
+                continue
+            for candidate in rows[i + 1 :]:
+                if consolidated >= max_pairs:
+                    break
+                if candidate["id"] in visited:
+                    continue
+                candidate_vec = self._decode_embedding(candidate.get("embedding"))
+                if candidate_vec is None:
+                    continue
+                denom = np.linalg.norm(base_vec) * np.linalg.norm(candidate_vec)
+                if denom == 0:
+                    continue
+                similarity = float(np.dot(base_vec, candidate_vec) / denom)
+                if similarity < similarity_threshold:
+                    continue
+
+                merged_content = f"{base.get('content', '')}\n\n{candidate.get('content', '')}".strip()
+                merged_score = min(
+                    1.0,
+                    max(float(base.get("importance_score") or 0.0), float(candidate.get("importance_score") or 0.0))
+                    + 0.05,
+                )
+                cursor.execute(
+                    """
+                    UPDATE unified_ai_memory
+                    SET content = ?, importance_score = ?, synced_at = NULL
+                    WHERE id = ?
+                    """,
+                    (merged_content, merged_score, base["id"]),
+                )
+                cursor.execute("DELETE FROM unified_ai_memory WHERE id = ?", (candidate["id"],))
+                consolidated += 1
+                visited.add(candidate["id"])
+
+        self.sqlite_conn.commit()
+        return {"status": "completed", "consolidated": consolidated}
+
+    def store_working_memory(
+        self,
+        context_id: str,
+        content: str,
+        *,
+        source_agent: str = "system",
+        priority: float = 0.85,
+        ttl_minutes: int = 120,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        """Store short-term high-priority context."""
+        if not ENABLE_EMBEDDED_WORKING_MEMORY:
+            return False
+        expires_at = datetime.utcnow().timestamp() + max(5, ttl_minutes) * 60
+        payload = dict(metadata or {})
+        payload.update(
+            {
+                "working_memory": True,
+                "context_id": context_id,
+                "priority": priority,
+                "expires_epoch": expires_at,
+            }
+        )
+        return self.store_memory(
+            content=content,
+            memory_type="working",
+            source_agent=source_agent,
+            metadata=payload,
+            importance_score=max(0.5, min(1.0, priority)),
+        )
+
+    def get_working_memory(self, context_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        """Get active working-memory entries for a context."""
+        if not self.sqlite_conn:
+            return []
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, content, metadata, importance_score, created_at
+            FROM unified_ai_memory
+            WHERE memory_type = 'working'
+            ORDER BY importance_score DESC, created_at DESC
+            LIMIT ?
+            """,
+            (max(1, limit * 3),),
+        )
+        now_epoch = datetime.utcnow().timestamp()
+        results: list[dict[str, Any]] = []
+        for row in cursor.fetchall():
+            item = dict(row)
+            meta = item.get("metadata")
+            if isinstance(meta, str):
+                try:
+                    meta = json.loads(meta)
+                except Exception:
+                    meta = {}
+            if not isinstance(meta, dict):
+                meta = {}
+            if str(meta.get("context_id")) != str(context_id):
+                continue
+            expires_epoch = float(meta.get("expires_epoch") or 0.0)
+            if expires_epoch and expires_epoch < now_epoch:
+                continue
+            item["metadata"] = meta
+            results.append(item)
+            if len(results) >= limit:
+                break
+        return results
+
+    def build_memory_context_for_decision(
+        self,
+        query: str,
+        *,
+        context_id: Optional[str] = None,
+        limit: int = 8,
+    ) -> dict[str, Any]:
+        """Build decision context by combining working and long-term memories."""
+        long_term = self.search_memories(query=query, limit=max(1, limit), min_importance=0.1)
+        working: list[dict[str, Any]] = []
+        if ENABLE_EMBEDDED_WORKING_MEMORY and context_id:
+            working = self.get_working_memory(context_id=context_id, limit=max(1, min(5, limit)))
+        combined = working + [m for m in long_term if m.get("id") not in {w.get("id") for w in working}]
+        return {
+            "query": query,
+            "context_id": context_id,
+            "working_memory_count": len(working),
+            "long_term_memory_count": len(long_term),
+            "memories": combined[: max(1, limit)],
+        }
+
+    def record_memory_quality_feedback(
+        self,
+        memory_id: str,
+        *,
+        usage_outcome_score: float,
+        used_in_decision: bool = True,
+    ) -> bool:
+        """Adjust importance using usage quality feedback."""
+        if not ENABLE_EMBEDDED_MEMORY_QUALITY_SCORING:
+            return False
+        if not self.sqlite_conn:
+            return False
+        cursor = self.sqlite_conn.cursor()
+        cursor.execute(
+            "SELECT metadata, importance_score, access_count FROM unified_ai_memory WHERE id = ?",
+            (memory_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            return False
+
+        metadata = row["metadata"]
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except Exception:
+                metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        quality = float(metadata.get("quality_score", 0.5))
+        outcome = max(0.0, min(1.0, float(usage_outcome_score)))
+        new_quality = (quality * 0.7) + (outcome * 0.3)
+        importance = float(row["importance_score"] or 0.0)
+        if used_in_decision:
+            importance = min(1.0, importance + (new_quality - 0.5) * 0.1)
+        else:
+            importance = max(0.05, importance - 0.02)
+        metadata["quality_score"] = round(new_quality, 4)
+        metadata["quality_feedback_at"] = datetime.utcnow().isoformat()
+        metadata["used_in_decision"] = bool(used_in_decision)
+        metadata["quality_feedback_count"] = int(metadata.get("quality_feedback_count") or 0) + 1
+        cursor.execute(
+            """
+            UPDATE unified_ai_memory
+            SET metadata = ?, importance_score = ?, synced_at = NULL
+            WHERE id = ?
+            """,
+            (json.dumps(metadata), importance, memory_id),
+        )
+        self.sqlite_conn.commit()
+        return True
+
     def search_memories(
         self,
         query: str,
@@ -214,6 +488,7 @@ class EmbeddedMemorySystem:
         """
         if not self.sqlite_conn:
             return []
+        self._apply_importance_decay_if_needed()
 
         # Auto-sync if empty (run in background to not block)
         cursor = self.sqlite_conn.cursor()
@@ -314,12 +589,17 @@ class EmbeddedMemorySystem:
             return False
 
         try:
+            self._apply_importance_decay_if_needed()
             # Auto-generate memory_id if not provided
             if memory_id is None:
                 memory_id = str(uuid.uuid4())
 
             # Generate embedding
             embedding = self._encode_embedding(content)
+            base_metadata = dict(metadata or {})
+            if ENABLE_EMBEDDED_MEMORY_QUALITY_SCORING:
+                base_metadata.setdefault("quality_score", 0.5)
+                base_metadata.setdefault("quality_feedback_count", 0)
 
             # Store locally
             cursor = self.sqlite_conn.cursor()
@@ -335,12 +615,16 @@ class EmbeddedMemorySystem:
                 source_agent,
                 content,
                 embedding,
-                json.dumps(metadata) if metadata else None,
+                json.dumps(base_metadata) if base_metadata else None,
                 importance_score,
                 datetime.now().isoformat(),
                 datetime.now().isoformat()
             ))
             self.sqlite_conn.commit()
+
+            if ENABLE_EMBEDDED_MEMORY_CONSOLIDATION:
+                # Keep consolidation lightweight during write path.
+                self.consolidate_similar_memories(similarity_threshold=0.96, max_pairs=5)
 
             # Async sync to master
             create_safe_task(self._sync_memory_to_master(memory_id))
@@ -719,6 +1003,27 @@ class EmbeddedMemorySystem:
             "last_sync": self.last_sync.isoformat() if self.last_sync else None,
             "embedding_model": self.embedding_model
         }
+        stats["working_memory_enabled"] = ENABLE_EMBEDDED_WORKING_MEMORY
+        stats["working_memory_items"] = cursor.execute(
+            "SELECT COUNT(*) FROM unified_ai_memory WHERE memory_type = 'working'"
+        ).fetchone()[0]
+        if ENABLE_EMBEDDED_MEMORY_QUALITY_SCORING:
+            cursor.execute("SELECT metadata FROM unified_ai_memory WHERE metadata IS NOT NULL")
+            quality_scores: list[float] = []
+            for row in cursor.fetchall():
+                metadata = row[0]
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except Exception:
+                        metadata = {}
+                if isinstance(metadata, dict) and isinstance(
+                    metadata.get("quality_score"), (int, float)
+                ):
+                    quality_scores.append(float(metadata["quality_score"]))
+            stats["avg_memory_quality_score"] = (
+                round(sum(quality_scores) / len(quality_scores), 4) if quality_scores else None
+            )
 
         # Memory by type
         cursor.execute("SELECT memory_type, COUNT(*) as count FROM unified_ai_memory GROUP BY memory_type")

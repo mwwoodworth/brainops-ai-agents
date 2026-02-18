@@ -26,7 +26,29 @@ try:
 except ImportError:
     MCP_AVAILABLE = False
 
+try:
+    from service_circuit_breakers import get_circuit_breaker_manager
+    CIRCUIT_BREAKERS_AVAILABLE = True
+except Exception:
+    CIRCUIT_BREAKERS_AVAILABLE = False
+    get_circuit_breaker_manager = None
+
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_SELF_HEALING_PREDICTIVE_DETECTION = _env_flag(
+    "ENABLE_SELF_HEALING_PREDICTIVE_DETECTION", "false"
+)
+ENABLE_SELF_HEALING_RECURRING_RCA = _env_flag("ENABLE_SELF_HEALING_RECURRING_RCA", "false")
+ENABLE_SELF_HEALING_RUNBOOK_AUTOMATION = _env_flag("ENABLE_SELF_HEALING_RUNBOOK_AUTOMATION", "false")
+ENABLE_SELF_HEALING_INCIDENT_TIMELINE = _env_flag("ENABLE_SELF_HEALING_INCIDENT_TIMELINE", "false")
+ENABLE_SELF_HEALING_CASCADING_PREVENTION = _env_flag(
+    "ENABLE_SELF_HEALING_CASCADING_PREVENTION", "false"
+)
 
 
 class IncidentSeverity(Enum):
@@ -223,6 +245,26 @@ class EnhancedSelfHealing:
         self.total_incidents = 0
         self.auto_resolved_incidents = 0
         self.avg_recovery_time_seconds = 0
+        self.incident_timelines: dict[str, list[dict[str, Any]]] = {}
+        self.component_circuit_state: dict[str, dict[str, Any]] = {}
+        self.circuit_manager = get_circuit_breaker_manager() if CIRCUIT_BREAKERS_AVAILABLE else None
+        self.runbook_registry: dict[str, list[dict[str, Any]]] = {
+            "memory pressure": [
+                {"action": RemediationAction.CLEAR_CACHE.value, "parameters": {"scope": "application"}},
+                {"action": RemediationAction.RESTART_SERVICE.value, "parameters": {}},
+            ],
+            "connection pool near exhaustion": [
+                {"action": RemediationAction.FLUSH_CONNECTIONS.value, "parameters": {}},
+                {"action": RemediationAction.SCALE_UP.value, "parameters": {"amount": 1}},
+            ],
+            "high latency causing request timeouts": [
+                {"action": RemediationAction.SCALE_UP.value, "parameters": {"amount": 1}},
+                {"action": RemediationAction.RESTART_SERVICE.value, "parameters": {}},
+            ],
+            "disk space exhaustion": [
+                {"action": RemediationAction.CUSTOM.value, "parameters": {"runbook": "disk_cleanup"}},
+            ],
+        }
 
     async def initialize(self):
         """Initialize the self-healing system"""
@@ -355,6 +397,265 @@ class EnhancedSelfHealing:
         hash_input = f"{prefix}:{datetime.utcnow().timestamp()}"
         return f"{prefix}_{hashlib.sha256(hash_input.encode()).hexdigest()[:12]}"
 
+    def _append_incident_event(
+        self,
+        incident_id: str,
+        event: str,
+        details: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """Store event entries used to reconstruct incident timeline."""
+        if not ENABLE_SELF_HEALING_INCIDENT_TIMELINE:
+            return
+        timeline = self.incident_timelines.setdefault(incident_id, [])
+        timeline.append(
+            {
+                "timestamp": datetime.utcnow().isoformat(),
+                "event": event,
+                "details": details or {},
+            }
+        )
+
+    def _bump_severity(self, current: IncidentSeverity, candidate: IncidentSeverity) -> IncidentSeverity:
+        ranking = {
+            IncidentSeverity.LOW: 1,
+            IncidentSeverity.MEDIUM: 2,
+            IncidentSeverity.HIGH: 3,
+            IncidentSeverity.CRITICAL: 4,
+        }
+        return candidate if ranking[candidate] > ranking[current] else current
+
+    def _component_key(self, component: str) -> str:
+        normalized = str(component or "unknown").strip().lower()
+        normalized = normalized.replace("-", "_").replace(" ", "_")
+        return normalized or "unknown"
+
+    def _resolve_circuit_service_name(self, component: str) -> str:
+        component_key = self._component_key(component)
+        mapping = {
+            "db": "database",
+            "database": "database",
+            "postgres": "database",
+            "supabase": "database",
+            "openai": "openai",
+            "anthropic": "anthropic",
+            "gemini": "gemini",
+            "render": "render_api",
+            "vercel": "vercel_api",
+            "mcp": "mcp_bridge",
+            "stripe": "stripe_api",
+        }
+        for needle, service_name in mapping.items():
+            if needle in component_key:
+                return service_name
+        return f"self_heal_{component_key}"
+
+    def _open_component_circuit(
+        self,
+        component: str,
+        reason: str,
+        ttl_seconds: int = 180,
+        incident_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        if not ENABLE_SELF_HEALING_CASCADING_PREVENTION:
+            return {"enabled": False, "open": False, "reason": "ENABLE_SELF_HEALING_CASCADING_PREVENTION=false"}
+
+        ttl = max(30, int(ttl_seconds or 0))
+        key = self._component_key(component)
+        open_until = datetime.utcnow().timestamp() + ttl
+        state = {
+            "open": True,
+            "reason": reason,
+            "opened_at": datetime.utcnow().isoformat(),
+            "open_until_ts": open_until,
+            "incident_id": incident_id,
+        }
+        self.component_circuit_state[key] = state
+
+        if self.circuit_manager is not None:
+            try:
+                service_name = self._resolve_circuit_service_name(component)
+                for _ in range(3):
+                    self.circuit_manager.record_failure(service_name, error=reason)
+            except Exception as exc:
+                logger.debug("Circuit manager open coordination failed: %s", exc)
+
+        return {"enabled": True, "open": True, "component": key, "open_until_ts": open_until, "reason": reason}
+
+    def _close_component_circuit(self, component: str, reason: str = "") -> dict[str, Any]:
+        key = self._component_key(component)
+        state = self.component_circuit_state.get(key)
+        if not state:
+            return {"closed": False, "reason": "not_open"}
+
+        state["open"] = False
+        state["closed_at"] = datetime.utcnow().isoformat()
+        if reason:
+            state["close_reason"] = reason
+
+        if self.circuit_manager is not None:
+            try:
+                service_name = self._resolve_circuit_service_name(component)
+                self.circuit_manager.record_success(service_name)
+                self.circuit_manager.reset(service_name)
+            except Exception as exc:
+                logger.debug("Circuit manager close coordination failed: %s", exc)
+
+        return {"closed": True, "component": key, "reason": reason}
+
+    def _is_component_circuit_open(self, component: str) -> bool:
+        if not ENABLE_SELF_HEALING_CASCADING_PREVENTION:
+            return False
+        key = self._component_key(component)
+        state = self.component_circuit_state.get(key)
+        if not state or not state.get("open"):
+            return False
+        if float(state.get("open_until_ts") or 0) <= datetime.utcnow().timestamp():
+            self._close_component_circuit(component, reason="ttl_expired")
+            return False
+        return True
+
+    async def _predict_failure_signal(self, component: str, metrics: dict[str, float]) -> dict[str, Any]:
+        """Predict pre-failure state before hard thresholds are crossed."""
+        if not ENABLE_SELF_HEALING_PREDICTIVE_DETECTION:
+            return {"enabled": False, "risk_score": 0.0, "signals": []}
+
+        pattern = self.health_patterns.get(f"pattern_{component}")
+        signals: list[str] = []
+        risk_score = 0.0
+        if pattern:
+            for metric_name, value in metrics.items():
+                if metric_name not in pattern.normal_ranges:
+                    continue
+                min_val, max_val = pattern.normal_ranges[metric_name]
+                span = max(0.0001, float(max_val) - float(min_val))
+                normalized = (float(value) - float(min_val)) / span
+                if normalized > 0.85:
+                    risk_score += 0.2
+                    signals.append(f"{metric_name}:approaching_upper_bound")
+                elif normalized < 0.15:
+                    risk_score += 0.15
+                    signals.append(f"{metric_name}:approaching_lower_bound")
+
+        if metrics.get("error_rate", 0) > 0.05:
+            risk_score += 0.25
+            signals.append("error_rate_trending_up")
+        if metrics.get("latency_ms", 0) > 2500:
+            risk_score += 0.20
+            signals.append("latency_degradation")
+        if metrics.get("memory_usage", 0) > 85:
+            risk_score += 0.20
+            signals.append("memory_pressure")
+
+        risk_score = min(1.0, risk_score)
+        return {"enabled": True, "risk_score": risk_score, "signals": signals}
+
+    def _detect_cascading_risk(self, component: str, metrics: dict[str, float]) -> dict[str, Any]:
+        """Detect likely cascading failures across dependent components."""
+        if not ENABLE_SELF_HEALING_CASCADING_PREVENTION:
+            return {"enabled": False, "cascading_risk": False, "reason": ""}
+
+        active_related = [
+            inc
+            for inc in self.incidents.values()
+            if inc.status in {IncidentStatus.DETECTED, IncidentStatus.ANALYZING, IncidentStatus.REMEDIATING}
+            and inc.component != component
+        ]
+        if not active_related:
+            return {"enabled": True, "cascading_risk": False, "reason": "no_active_related_incidents"}
+
+        high_load = metrics.get("cpu_usage", 0) > 80 or metrics.get("memory_usage", 0) > 88
+        high_errors = metrics.get("error_rate", 0) > 0.08
+        cascading = high_load and high_errors
+        reason = (
+            f"active_incidents={len(active_related)}, high_load={high_load}, high_errors={high_errors}"
+            if cascading
+            else "risk_below_threshold"
+        )
+        return {"enabled": True, "cascading_risk": cascading, "reason": reason}
+
+    async def _enrich_root_cause_with_recurrence(self, component: str, root_cause: str) -> str:
+        """Append recurrence analysis for repeated failure classes."""
+        if not ENABLE_SELF_HEALING_RECURRING_RCA:
+            return root_cause
+        try:
+            async with _get_db_connection(self.db_url) as conn:
+                if conn is None:
+                    return root_cause
+                row = await conn.fetchrow(
+                    """
+                    SELECT COUNT(*) AS incidents
+                    FROM remediation_history
+                    WHERE component = $1
+                      AND incident_type = $2
+                      AND success = FALSE
+                      AND created_at > NOW() - INTERVAL '30 days'
+                    """,
+                    component,
+                    root_cause,
+                )
+                recurrence = int(row["incidents"] or 0) if row else 0
+                if recurrence >= 3:
+                    return f"{root_cause}; recurring_failure_pattern({recurrence} in last 30d)"
+        except Exception as exc:
+            logger.debug("Recurrence enrichment failed: %s", exc)
+        return root_cause
+
+    def _apply_known_runbook(self, root_cause: str, plan: RemediationPlan) -> bool:
+        """Inject known runbook actions for familiar failure signatures."""
+        if not ENABLE_SELF_HEALING_RUNBOOK_AUTOMATION:
+            return False
+
+        root_lower = (root_cause or "").lower()
+        for signature, runbook_actions in self.runbook_registry.items():
+            if signature in root_lower:
+                existing_actions = {item.get("action") for item in plan.actions}
+                for action in runbook_actions:
+                    if action.get("action") not in existing_actions:
+                        plan.actions.append(
+                            {
+                                "action": action.get("action"),
+                                "parameters": action.get("parameters", {}),
+                                "source": "runbook",
+                                "signature": signature,
+                            }
+                        )
+                plan.confidence = min(0.98, max(plan.confidence, 0.82))
+                return True
+        return False
+
+    async def reconstruct_incident_timeline(self, incident_id: str) -> list[dict[str, Any]]:
+        """Rebuild incident timeline for post-mortem analysis."""
+        if not ENABLE_SELF_HEALING_INCIDENT_TIMELINE:
+            return []
+        incident = self.incidents.get(incident_id)
+        if not incident:
+            return []
+
+        entries: list[dict[str, Any]] = []
+        entries.append({"timestamp": incident.detected_at, "event": "detected", "details": incident.metrics})
+        if incident.root_cause:
+            entries.append({"timestamp": incident.detected_at, "event": "root_cause", "details": {"value": incident.root_cause}})
+        for step in incident.remediation_steps:
+            entries.append(
+                {
+                    "timestamp": step.get("timestamp"),
+                    "event": "remediation_step",
+                    "details": step,
+                }
+            )
+        for escalation in incident.escalation_history:
+            entries.append(
+                {
+                    "timestamp": escalation.get("timestamp"),
+                    "event": "escalation",
+                    "details": escalation,
+                }
+            )
+        entries.extend(self.incident_timelines.get(incident_id, []))
+        entries = [e for e in entries if e.get("timestamp")]
+        entries.sort(key=lambda item: item.get("timestamp"))
+        return entries
+
     async def detect_anomaly(
         self,
         component: str,
@@ -379,6 +680,8 @@ class EnhancedSelfHealing:
 
         anomalies = []
         severity = IncidentSeverity.LOW
+        predictive_signal = await self._predict_failure_signal(component, metrics)
+        cascading_risk = self._detect_cascading_risk(component, metrics)
 
         # Check against learned patterns
         if pattern:
@@ -398,9 +701,9 @@ class EnhancedSelfHealing:
                         if deviation > 3:
                             severity = IncidentSeverity.CRITICAL
                         elif deviation > 2:
-                            severity = max(severity, IncidentSeverity.HIGH)
+                            severity = self._bump_severity(severity, IncidentSeverity.HIGH)
                         elif deviation > 1.5:
-                            severity = max(severity, IncidentSeverity.MEDIUM)
+                            severity = self._bump_severity(severity, IncidentSeverity.MEDIUM)
 
         # Check for known anomaly signatures
         if pattern and pattern.anomaly_signatures:
@@ -411,7 +714,9 @@ class EnhancedSelfHealing:
                         "signature": signature.get("name", "unknown"),
                         "description": signature.get("description", "")
                     })
-                    severity = max(severity, IncidentSeverity(signature.get("severity", "medium")))
+                    severity = self._bump_severity(
+                        severity, IncidentSeverity(signature.get("severity", "medium"))
+                    )
 
         # Default checks if no pattern exists
         if not pattern:
@@ -420,35 +725,93 @@ class EnhancedSelfHealing:
                 severity = IncidentSeverity.HIGH
             if metrics.get("cpu_usage", 0) > 90:
                 anomalies.append({"metric": "cpu_usage", "value": metrics["cpu_usage"], "threshold": 90})
-                severity = max(severity, IncidentSeverity.HIGH)
+                severity = self._bump_severity(severity, IncidentSeverity.HIGH)
             if metrics.get("memory_usage", 0) > 95:
                 anomalies.append({"metric": "memory_usage", "value": metrics["memory_usage"], "threshold": 95})
                 severity = IncidentSeverity.CRITICAL
             if metrics.get("latency_ms", 0) > 5000:
                 anomalies.append({"metric": "latency_ms", "value": metrics["latency_ms"], "threshold": 5000})
-                severity = max(severity, IncidentSeverity.MEDIUM)
+                severity = self._bump_severity(severity, IncidentSeverity.MEDIUM)
+
+        if predictive_signal.get("enabled") and predictive_signal.get("risk_score", 0) >= 0.75:
+            anomalies.append(
+                {
+                    "type": "predictive_degradation",
+                    "risk_score": predictive_signal.get("risk_score", 0),
+                    "signals": predictive_signal.get("signals", []),
+                }
+            )
+            if predictive_signal.get("risk_score", 0) >= 0.9:
+                severity = self._bump_severity(severity, IncidentSeverity.HIGH)
+            else:
+                severity = self._bump_severity(severity, IncidentSeverity.MEDIUM)
+
+        if cascading_risk.get("cascading_risk"):
+            anomalies.append(
+                {
+                    "type": "cascading_failure_risk",
+                    "reason": cascading_risk.get("reason", ""),
+                }
+            )
+            severity = self._bump_severity(severity, IncidentSeverity.HIGH)
 
         if not anomalies:
             # Update pattern with healthy data
             if self.learning_enabled:
                 await self._update_pattern_with_healthy_data(component, metrics)
+            self._close_component_circuit(component, reason="healthy_metrics_observed")
             return None
 
         # Create incident
+        incident_metrics = dict(metrics or {})
+        if predictive_signal.get("enabled"):
+            incident_metrics["_predictive_signal"] = predictive_signal
+        if cascading_risk.get("enabled"):
+            incident_metrics["_cascading_risk"] = cascading_risk
+        if context:
+            incident_metrics["_context"] = context
+
+        description = f"Anomaly detected in {component}: {len(anomalies)} signal(s)"
+        if predictive_signal.get("enabled") and predictive_signal.get("risk_score", 0) >= 0.75:
+            description = f"Predictive degradation detected for {component} (risk={predictive_signal.get('risk_score', 0):.2f})"
+
         incident = Incident(
             incident_id=self._generate_id("inc"),
             component=component,
-            description=f"Anomaly detected in {component}: {len(anomalies)} metric(s) out of range",
+            description=description,
             severity=severity,
             status=IncidentStatus.DETECTED,
             detected_at=datetime.utcnow().isoformat(),
             resolved_at=None,
-            metrics=metrics,
+            metrics=incident_metrics,
             root_cause=None
         )
 
         self.incidents[incident.incident_id] = incident
         self.total_incidents += 1
+        self._append_incident_event(
+            incident.incident_id,
+            "detected",
+            {
+                "component": component,
+                "severity": incident.severity.value,
+                "signals": anomalies[:8],
+            },
+        )
+
+        if cascading_risk.get("cascading_risk"):
+            circuit_state = self._open_component_circuit(
+                component,
+                reason=cascading_risk.get("reason", "cascading_failure_risk"),
+                ttl_seconds=300,
+                incident_id=incident.incident_id,
+            )
+            incident.metrics["_circuit_breaker"] = circuit_state
+            self._append_incident_event(
+                incident.incident_id,
+                "circuit_breaker_opened",
+                circuit_state,
+            )
 
         await self._persist_incident(incident)
 
@@ -525,23 +888,43 @@ class EnhancedSelfHealing:
         """Analyze incident and attempt remediation"""
         incident.status = IncidentStatus.ANALYZING
         await self._persist_incident(incident)
+        self._append_incident_event(
+            incident.incident_id,
+            "analysis_started",
+            {"component": incident.component},
+        )
 
         start_time = datetime.utcnow()
 
         # Step 1: Root cause analysis
         root_cause = await self._analyze_root_cause(incident)
+        root_cause = await self._enrich_root_cause_with_recurrence(incident.component, root_cause)
         incident.root_cause = root_cause
+        self._append_incident_event(
+            incident.incident_id,
+            "root_cause_identified",
+            {"root_cause": root_cause},
+        )
 
         # Step 2: Generate remediation plan
         plan = await self._generate_remediation_plan(incident)
+        runbook_applied = self._apply_known_runbook(root_cause, plan)
+        if runbook_applied:
+            self._append_incident_event(
+                incident.incident_id,
+                "runbook_applied",
+                {"plan_id": plan.plan_id, "actions": len(plan.actions)},
+            )
         self.remediation_plans[plan.plan_id] = plan
+        self.remediation_plans[incident.incident_id] = plan
 
         # Step 3: Decide if auto-remediation is appropriate
+        action_budget = self.max_auto_actions + (1 if runbook_applied else 0)
         can_auto_remediate = (
             self.autofix_enabled and
             self.tiered_autonomy_enabled and
             plan.confidence >= self.auto_remediate_threshold and
-            len(plan.actions) <= self.max_auto_actions and
+            len(plan.actions) <= action_budget and
             incident.severity != IncidentSeverity.CRITICAL
         )
 
@@ -549,6 +932,11 @@ class EnhancedSelfHealing:
             # Auto-remediate
             incident.status = IncidentStatus.REMEDIATING
             await self._persist_incident(incident)
+            self._append_incident_event(
+                incident.incident_id,
+                "remediation_started",
+                {"plan_id": plan.plan_id, "action_count": len(plan.actions)},
+            )
 
             success = await self._execute_remediation_plan(plan, incident)
 
@@ -562,6 +950,15 @@ class EnhancedSelfHealing:
 
                 # Update average recovery time
                 self._update_avg_recovery_time(incident.recovery_time_seconds)
+                self._close_component_circuit(incident.component, reason="incident_resolved")
+                self._append_incident_event(
+                    incident.incident_id,
+                    "incident_resolved",
+                    {
+                        "auto_resolved": True,
+                        "recovery_time_seconds": incident.recovery_time_seconds,
+                    },
+                )
 
                 # Learn from successful remediation
                 await self._learn_from_remediation(incident, plan, success=True)
@@ -573,6 +970,17 @@ class EnhancedSelfHealing:
                     "reason": "Auto-remediation failed",
                     "plan_id": plan.plan_id
                 })
+                self._open_component_circuit(
+                    incident.component,
+                    reason="auto_remediation_failed",
+                    ttl_seconds=300,
+                    incident_id=incident.incident_id,
+                )
+                self._append_incident_event(
+                    incident.incident_id,
+                    "incident_escalated",
+                    {"reason": "Auto-remediation failed", "plan_id": plan.plan_id},
+                )
         else:
             # Requires human approval
             incident.status = IncidentStatus.ESCALATED
@@ -582,6 +990,22 @@ class EnhancedSelfHealing:
                 "plan_id": plan.plan_id,
                 "confidence": plan.confidence
             })
+            if incident.metrics.get("_cascading_risk", {}).get("cascading_risk"):
+                self._open_component_circuit(
+                    incident.component,
+                    reason="human_approval_required_under_cascading_risk",
+                    ttl_seconds=300,
+                    incident_id=incident.incident_id,
+                )
+            self._append_incident_event(
+                incident.incident_id,
+                "incident_escalated",
+                {
+                    "reason": "Confidence below threshold or too many actions",
+                    "plan_id": plan.plan_id,
+                    "confidence": plan.confidence,
+                },
+            )
 
         await self._persist_incident(incident)
 
@@ -673,6 +1097,21 @@ class EnhancedSelfHealing:
                 })
                 confidence = max(confidence, 0.7)
 
+        if (
+            ENABLE_SELF_HEALING_CASCADING_PREVENTION
+            and metrics.get("_cascading_risk", {}).get("cascading_risk")
+        ):
+            actions.insert(
+                0,
+                {
+                    "action": RemediationAction.FLUSH_CONNECTIONS.value,
+                    "parameters": {"component": component},
+                    "source": "cascading_failure_prevention",
+                    "rationale": "Reduce cross-component pressure before disruptive remediation",
+                },
+            )
+            confidence = max(confidence, 0.78)
+
         # If no actions determined, default to restart
         if not actions:
             actions.append({
@@ -721,9 +1160,37 @@ class EnhancedSelfHealing:
     async def _execute_remediation_plan(self, plan: RemediationPlan, incident: Incident) -> bool:
         """Execute a remediation plan"""
         success = True
+        executed_actions = 0
+        safe_when_circuit_open = {
+            RemediationAction.CLEAR_CACHE.value,
+            RemediationAction.FLUSH_CONNECTIONS.value,
+            RemediationAction.SCALE_UP.value,
+            RemediationAction.INCREASE_RESOURCES.value,
+        }
 
         for action_spec in plan.actions:
             try:
+                action_name = action_spec.get("action")
+                if (
+                    ENABLE_SELF_HEALING_CASCADING_PREVENTION
+                    and self._is_component_circuit_open(incident.component)
+                    and action_name not in safe_when_circuit_open
+                ):
+                    deferred = {
+                        "action": action_name,
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "success": False,
+                        "deferred": True,
+                        "reason": "circuit_breaker_open_preventing_cascade",
+                    }
+                    incident.remediation_steps.append(deferred)
+                    self._append_incident_event(
+                        incident.incident_id,
+                        "remediation_action_deferred",
+                        deferred,
+                    )
+                    continue
+
                 action_type = RemediationAction(action_spec["action"])
                 handler = self.remediation_handlers.get(action_type)
 
@@ -735,11 +1202,26 @@ class EnhancedSelfHealing:
                         "result": result,
                         "success": result.get("success", False)
                     })
+                    self._append_incident_event(
+                        incident.incident_id,
+                        "remediation_action_executed",
+                        {
+                            "action": action_spec["action"],
+                            "success": result.get("success", False),
+                        },
+                    )
 
                     if not result.get("success", False):
                         success = False
+                        if ENABLE_SELF_HEALING_CASCADING_PREVENTION:
+                            self._open_component_circuit(
+                                incident.component,
+                                reason=f"action_failed:{action_spec['action']}",
+                                incident_id=incident.incident_id,
+                            )
                         break
 
+                    executed_actions += 1
                     # Wait between actions
                     await asyncio.sleep(5)
                 else:
@@ -753,8 +1235,20 @@ class EnhancedSelfHealing:
                     "error": str(e),
                     "success": False
                 })
+                self._append_incident_event(
+                    incident.incident_id,
+                    "remediation_action_failed",
+                    {"action": action_spec.get("action"), "error": str(e)},
+                )
                 success = False
                 break
+
+        if (
+            ENABLE_SELF_HEALING_CASCADING_PREVENTION
+            and self._is_component_circuit_open(incident.component)
+            and executed_actions == 0
+        ):
+            success = False
 
         plan.executed = True
         return success
@@ -1304,6 +1798,11 @@ class EnhancedSelfHealing:
 
     def get_metrics(self) -> dict[str, Any]:
         """Get self-healing system metrics"""
+        open_circuits = [
+            component
+            for component, state in self.component_circuit_state.items()
+            if state.get("open")
+        ]
         return {
             "total_incidents": self.total_incidents,
             "auto_resolved": self.auto_resolved_incidents,
@@ -1315,7 +1814,15 @@ class EnhancedSelfHealing:
             "patterns_learned": len(self.health_patterns),
             "active_incidents": len([i for i in self.incidents.values() if i.status not in [IncidentStatus.RESOLVED]]),
             "tiered_autonomy_enabled": self.tiered_autonomy_enabled,
-            "auto_remediate_threshold": self.auto_remediate_threshold
+            "auto_remediate_threshold": self.auto_remediate_threshold,
+            "features": {
+                "recurring_root_cause_analysis": ENABLE_SELF_HEALING_RECURRING_RCA,
+                "predictive_detection": ENABLE_SELF_HEALING_PREDICTIVE_DETECTION,
+                "runbook_automation": ENABLE_SELF_HEALING_RUNBOOK_AUTOMATION,
+                "incident_timeline": ENABLE_SELF_HEALING_INCIDENT_TIMELINE,
+                "cascading_failure_prevention": ENABLE_SELF_HEALING_CASCADING_PREVENTION,
+            },
+            "open_component_circuits": open_circuits,
         }
 
     async def record_pattern(
@@ -1420,7 +1927,7 @@ class EnhancedSelfHealing:
         incident = self.incidents.get(incident_id)
         if not incident:
             return None
-        return {
+        payload = {
             "incident_id": incident.incident_id,
             "component": incident.component,
             "severity": incident.severity.value,
@@ -1430,18 +1937,26 @@ class EnhancedSelfHealing:
             "remediation_steps": incident.remediation_steps,
             "metrics": incident.metrics
         }
+        if ENABLE_SELF_HEALING_INCIDENT_TIMELINE:
+            payload["timeline"] = await self.reconstruct_incident_timeline(incident_id)
+        return payload
 
     async def get_remediation_plan(self, incident_id: str) -> Optional[dict[str, Any]]:
         """Get remediation plan for an incident"""
         plan = self.remediation_plans.get(incident_id)
+        if not plan:
+            plan = next(
+                (candidate for candidate in self.remediation_plans.values() if candidate.incident_id == incident_id),
+                None,
+            )
         if not plan:
             return None
         return {
             "plan_id": plan.plan_id,
             "incident_id": plan.incident_id,
             "actions": plan.actions,
-            "estimated_recovery_time": plan.estimated_recovery_time,
-            "risk_level": plan.risk_level.value if hasattr(plan.risk_level, 'value') else plan.risk_level,
+            "estimated_recovery_seconds": plan.estimated_recovery_seconds,
+            "confidence": plan.confidence,
             "requires_approval": plan.requires_approval
         }
 
@@ -1455,18 +1970,43 @@ class EnhancedSelfHealing:
         """Process approval/rejection of a remediation plan"""
         plan = self.remediation_plans.get(incident_id)
         if not plan:
+            plan = next(
+                (candidate for candidate in self.remediation_plans.values() if candidate.incident_id == incident_id),
+                None,
+            )
+        if not plan:
             return {"status": "error", "message": f"No remediation plan for incident {incident_id}"}
 
         if approved:
             incident = self.incidents.get(incident_id)
             if incident:
                 success = await self._execute_remediation_plan(plan, incident)
+                incident.status = IncidentStatus.RESOLVED if success else IncidentStatus.ESCALATED
+                if success:
+                    incident.resolved_at = datetime.utcnow().isoformat()
+                    self._close_component_circuit(incident.component, reason="manual_approval_success")
+                else:
+                    self._open_component_circuit(
+                        incident.component,
+                        reason="manual_approval_execution_failed",
+                        incident_id=incident.incident_id,
+                    )
+                await self._persist_incident(incident)
                 result = {
                     "status": "executed" if success else "failed",
                     "approved_by": approver,
                     "notes": notes,
                     "incident_id": incident_id
                 }
+                self._append_incident_event(
+                    incident_id,
+                    "approval_processed",
+                    {
+                        "approved": True,
+                        "approved_by": approver,
+                        "execution_status": result["status"],
+                    },
+                )
                 await self._log_to_unified_brain('remediation_approval', result)
                 return result
         else:
@@ -1476,6 +2016,15 @@ class EnhancedSelfHealing:
                 "notes": notes,
                 "incident_id": incident_id
             }
+            incident = self.incidents.get(incident_id)
+            if incident:
+                incident.status = IncidentStatus.ESCALATED
+                await self._persist_incident(incident)
+            self._append_incident_event(
+                incident_id,
+                "approval_processed",
+                {"approved": False, "rejected_by": approver},
+            )
             await self._log_to_unified_brain('remediation_rejected', result)
             return result
 

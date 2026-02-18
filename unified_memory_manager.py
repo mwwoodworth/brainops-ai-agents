@@ -28,6 +28,19 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _env_flag(name: str, default: str = "false") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_UNIFIED_MEMORY_DECAY = _env_flag("ENABLE_UNIFIED_MEMORY_DECAY", "false")
+ENABLE_UNIFIED_WORKING_MEMORY = _env_flag("ENABLE_UNIFIED_WORKING_MEMORY", "false")
+ENABLE_UNIFIED_MEMORY_INFORMED_DECISIONS = _env_flag(
+    "ENABLE_UNIFIED_MEMORY_INFORMED_DECISIONS", "false"
+)
+ENABLE_UNIFIED_MEMORY_QUALITY_FEEDBACK = _env_flag("ENABLE_UNIFIED_MEMORY_QUALITY_FEEDBACK", "false")
+ENABLE_UNIFIED_MEMORY_AUTO_CONSOLIDATION = _env_flag("ENABLE_UNIFIED_MEMORY_AUTO_CONSOLIDATION", "false")
+
+
 class CustomJSONEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
@@ -93,6 +106,7 @@ class UnifiedMemoryManager:
             or os.getenv("DEFAULT_TENANT_ID")
             or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"  # Weathercraft primary tenant fallback
         )
+        self._last_decay_at: Optional[datetime] = None
         self._pool = None
         self._init_pool()
 
@@ -237,6 +251,21 @@ class UnifiedMemoryManager:
             else:
                 raise ValueError("tenant_id is mandatory for memory storage")
 
+        if ENABLE_UNIFIED_MEMORY_DECAY:
+            try:
+                if (
+                    not self._last_decay_at
+                    or (datetime.utcnow() - self._last_decay_at).total_seconds() > 3600
+                ):
+                    self.apply_importance_decay(memory.tenant_id)
+            except Exception as exc:
+                logger.debug("Skipping decay during store due to error: %s", exc)
+
+        if ENABLE_UNIFIED_MEMORY_QUALITY_FEEDBACK:
+            memory.metadata = dict(memory.metadata or {})
+            memory.metadata.setdefault("quality_score", 0.5)
+            memory.metadata.setdefault("quality_feedback_count", 0)
+
         try:
             # Check for duplicates
             existing = self._find_duplicate(memory)
@@ -324,6 +353,12 @@ class UnifiedMemoryManager:
                     },
                 )
 
+                if ENABLE_UNIFIED_MEMORY_AUTO_CONSOLIDATION:
+                    try:
+                        self.consolidate(aggressive=False)
+                    except Exception as exc:
+                        logger.debug("Auto consolidation skipped: %s", exc)
+
                 return memory_id
 
         except Exception as e:
@@ -378,6 +413,16 @@ class UnifiedMemoryManager:
             raise ValueError("tenant_id is required for memory recall")
 
         try:
+            if ENABLE_UNIFIED_MEMORY_DECAY:
+                try:
+                    if (
+                        not self._last_decay_at
+                        or (datetime.utcnow() - self._last_decay_at).total_seconds() > 3600
+                    ):
+                        self.apply_importance_decay(tenant_id)
+                except Exception as decay_exc:
+                    logger.debug("Decay skipped during recall: %s", decay_exc)
+
             # Generate query embedding
             if isinstance(query, str):
                 query_content = {"query": query}
@@ -448,8 +493,27 @@ class UnifiedMemoryManager:
                         },
                     )
 
-                logger.info(f"📚 Recalled {len(memories)} relevant memories")
-                return [dict(m) for m in memories]
+                result_memories = [dict(m) for m in memories]
+                if (
+                    ENABLE_UNIFIED_MEMORY_INFORMED_DECISIONS
+                    and ENABLE_UNIFIED_WORKING_MEMORY
+                    and context
+                    and (memory_type is None or memory_type == MemoryType.WORKING)
+                ):
+                    working = self.get_working_memory(
+                        context_id=context,
+                        tenant_id=tenant_id,
+                        limit=max(1, min(5, limit)),
+                    )
+                    if working:
+                        seen_ids = {m.get("id") for m in result_memories}
+                        result_memories = working + [
+                            m for m in result_memories if m.get("id") not in seen_ids
+                        ]
+                        result_memories = result_memories[: max(1, limit)]
+
+                logger.info(f"📚 Recalled {len(result_memories)} relevant memories")
+                return result_memories
 
         except Exception as e:
             logger.error(f"❌ Failed to recall memories: {e}")
@@ -483,6 +547,46 @@ class UnifiedMemoryManager:
     async def apply_retention_policy_async(self, tenant_id=None, aggressive=False):
         """Async wrapper for apply_retention_policy"""
         return await asyncio.to_thread(self.apply_retention_policy, tenant_id, aggressive)
+
+    async def apply_importance_decay_async(self, tenant_id=None, half_life_days: float = 45.0):
+        """Async wrapper for apply_importance_decay."""
+        return await asyncio.to_thread(
+            self.apply_importance_decay,
+            tenant_id,
+            half_life_days=half_life_days,
+        )
+
+    async def build_memory_context_for_decision_async(
+        self,
+        query: str,
+        context_id: str | None = None,
+        tenant_id: str | None = None,
+        limit: int = 12,
+    ):
+        """Async wrapper for build_memory_context_for_decision."""
+        return await asyncio.to_thread(
+            self.build_memory_context_for_decision,
+            query,
+            context_id=context_id,
+            tenant_id=tenant_id,
+            limit=limit,
+        )
+
+    async def record_memory_quality_feedback_async(
+        self,
+        memory_id: str,
+        quality_score: float,
+        tenant_id: str | None = None,
+        used_in_decision: bool = True,
+    ):
+        """Async wrapper for record_memory_quality_feedback."""
+        return await asyncio.to_thread(
+            self.record_memory_quality_feedback,
+            memory_id,
+            quality_score=quality_score,
+            tenant_id=tenant_id,
+            used_in_decision=used_in_decision,
+        )
 
     async def auto_garbage_collect_async(self, tenant_id=None, dry_run=False):
         """Async wrapper for auto_garbage_collect"""
@@ -686,6 +790,235 @@ class UnifiedMemoryManager:
         except Exception as e:
             logger.error(f"❌ Failed to consolidate memories: {e}")
             # Note: Connection rollback is handled automatically by the pool
+
+    def apply_importance_decay(
+        self,
+        tenant_id: str = None,
+        *,
+        half_life_days: float = 45.0,
+        floor: float = 0.05,
+    ) -> dict[str, Any]:
+        """Apply gradual time-based decay so older memories lose relevance."""
+        if not ENABLE_UNIFIED_MEMORY_DECAY:
+            return {"status": "skipped", "reason": "ENABLE_UNIFIED_MEMORY_DECAY=false"}
+        tid = tenant_id or self.tenant_id
+        if not tid:
+            raise ValueError("tenant_id is required for decay")
+
+        with self._get_cursor() as cur:
+            cur.execute(
+                """
+                UPDATE unified_ai_memory
+                SET importance_score = GREATEST(
+                    %s,
+                    LEAST(
+                        1.0,
+                        importance_score * POWER(
+                            0.5,
+                            EXTRACT(EPOCH FROM (NOW() - created_at)) / (%s * 86400.0)
+                        )
+                    )
+                )
+                WHERE tenant_id = %s
+                  AND archived = FALSE
+                  AND expires_at IS NULL
+                """,
+                (max(0.0, floor), max(1.0, half_life_days), tid),
+            )
+            updated = cur.rowcount
+            self.conn.commit()
+        self._last_decay_at = datetime.utcnow()
+        return {
+            "status": "completed",
+            "updated": updated,
+            "tenant_id": tid,
+            "half_life_days": half_life_days,
+            "floor": floor,
+        }
+
+    def store_working_memory(
+        self,
+        context_id: str,
+        content: dict[str, Any],
+        *,
+        tenant_id: str = None,
+        source_agent: str = "memory_orchestrator",
+        created_by: str = "system",
+        priority: float = 0.85,
+        ttl_minutes: int = 120,
+        tags: Optional[list[str]] = None,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> Optional[str]:
+        """Persist short-term high-priority working context."""
+        if not ENABLE_UNIFIED_WORKING_MEMORY:
+            return None
+        tid = tenant_id or self.tenant_id
+        if not tid:
+            raise ValueError("tenant_id is required for working memory")
+
+        expires_at = datetime.utcnow() + timedelta(minutes=max(5, ttl_minutes))
+        payload = dict(metadata or {})
+        payload.update(
+            {
+                "working_memory": True,
+                "priority": priority,
+                "ttl_minutes": ttl_minutes,
+                "context_id": context_id,
+            }
+        )
+        return self.store(
+            Memory(
+                memory_type=MemoryType.WORKING,
+                content=content,
+                source_system="working_memory",
+                source_agent=source_agent,
+                created_by=created_by,
+                importance_score=max(0.5, min(1.0, priority)),
+                tags=(tags or []) + ["working_memory"],
+                metadata=payload,
+                context_id=context_id,
+                expires_at=expires_at,
+                tenant_id=tid,
+            )
+        )
+
+    def get_working_memory(
+        self,
+        context_id: str,
+        *,
+        tenant_id: str = None,
+        limit: int = 10,
+    ) -> list[dict[str, Any]]:
+        """Fetch active working memory for a context."""
+        tid = tenant_id or self.tenant_id
+        if not tid:
+            raise ValueError("tenant_id is required for working-memory recall")
+
+        with self._get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, memory_type, content, source_system, source_agent,
+                       importance_score, access_count, created_at, tags, metadata, context_id
+                FROM unified_ai_memory
+                WHERE tenant_id = %s
+                  AND memory_type = 'working'
+                  AND context_id = %s
+                  AND archived = FALSE
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                ORDER BY importance_score DESC, created_at DESC
+                LIMIT %s
+                """,
+                (tid, context_id, max(1, limit)),
+            )
+            rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+
+    def build_memory_context_for_decision(
+        self,
+        query: str,
+        *,
+        context_id: str | None = None,
+        tenant_id: str = None,
+        limit: int = 12,
+    ) -> dict[str, Any]:
+        """Return unified decision context with working + long-term memories."""
+        tid = tenant_id or self.tenant_id
+        if not tid:
+            raise ValueError("tenant_id is required for decision context")
+
+        if ENABLE_UNIFIED_MEMORY_DECAY:
+            try:
+                if (
+                    not self._last_decay_at
+                    or (datetime.utcnow() - self._last_decay_at).total_seconds() > 3600
+                ):
+                    self.apply_importance_decay(tid)
+            except Exception as exc:
+                logger.debug("Decay skipped during decision-context build: %s", exc)
+
+        long_term = self.recall(query, tenant_id=tid, limit=max(1, limit))
+        working: list[dict[str, Any]] = []
+        if ENABLE_UNIFIED_WORKING_MEMORY and context_id:
+            working = self.get_working_memory(context_id=context_id, tenant_id=tid, limit=max(1, min(6, limit)))
+
+        combined = working + [m for m in long_term if m.get("id") not in {w.get("id") for w in working}]
+        return {
+            "query": query,
+            "tenant_id": tid,
+            "context_id": context_id,
+            "working_memory_count": len(working),
+            "long_term_memory_count": len(long_term),
+            "memories": combined[: max(1, limit)],
+        }
+
+    def record_memory_quality_feedback(
+        self,
+        memory_id: str,
+        *,
+        quality_score: float,
+        tenant_id: str = None,
+        used_in_decision: bool = True,
+    ) -> bool:
+        """Use retrieval/decision outcomes to improve memory quality and importance."""
+        if not ENABLE_UNIFIED_MEMORY_QUALITY_FEEDBACK:
+            return False
+        tid = tenant_id or self.tenant_id
+        if not tid:
+            raise ValueError("tenant_id is required for quality feedback")
+
+        with self._get_cursor() as cur:
+            cur.execute(
+                """
+                SELECT metadata, importance_score
+                FROM unified_ai_memory
+                WHERE id = %s AND tenant_id = %s
+                LIMIT 1
+                """,
+                (memory_id, tid),
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+            metadata = row.get("metadata")
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+
+            old_quality = float(metadata.get("quality_score", 0.5))
+            bounded_score = max(0.0, min(1.0, float(quality_score)))
+            new_quality = (old_quality * 0.7) + (bounded_score * 0.3)
+            feedback_count = int(metadata.get("quality_feedback_count", 0)) + 1
+            metadata.update(
+                {
+                    "quality_score": round(new_quality, 4),
+                    "quality_feedback_count": feedback_count,
+                    "quality_feedback_at": datetime.utcnow().isoformat(),
+                    "used_in_decision": bool(used_in_decision),
+                }
+            )
+            old_importance = float(row.get("importance_score") or 0.0)
+            if used_in_decision:
+                delta = (new_quality - 0.5) * 0.1
+            else:
+                delta = -0.03
+            new_importance = max(0.05, min(1.0, old_importance + delta))
+
+            cur.execute(
+                """
+                UPDATE unified_ai_memory
+                SET metadata = %s,
+                    importance_score = %s,
+                    updated_at = NOW()
+                WHERE id = %s AND tenant_id = %s
+                """,
+                (Json(metadata), new_importance, memory_id, tid),
+            )
+            self.conn.commit()
+        return True
 
     def migrate_from_chaos(self, tenant_id: str = None, limit: int = 1000):
         """Migrate data from the 53 chaotic memory tables"""

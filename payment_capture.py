@@ -40,6 +40,8 @@ def _env_int(name: str, default: int) -> int:
 ENABLE_PARTIAL_PAYMENTS = _env_flag("PAYMENT_CAPTURE_ENABLE_PARTIAL_PAYMENTS", "true")
 ENABLE_PAYMENT_RETRY = _env_flag("PAYMENT_CAPTURE_ENABLE_RETRY", "true")
 ENABLE_PAYMENT_PLAN_ENFORCEMENT = _env_flag("PAYMENT_CAPTURE_ENFORCE_PLAN", "true")
+ENABLE_PAYMENT_FOLLOWUP_ESCALATION = _env_flag("PAYMENT_CAPTURE_ENABLE_FOLLOWUP_ESCALATION", "false")
+ENABLE_COLLECTION_FORECAST = _env_flag("PAYMENT_CAPTURE_ENABLE_COLLECTION_FORECAST", "false")
 PAYMENT_RETRY_MAX_ATTEMPTS = max(1, _env_int("PAYMENT_CAPTURE_RETRY_ATTEMPTS", 3))
 
 def resolve_stripe_secret_key_with_source() -> tuple[str, str]:
@@ -101,6 +103,19 @@ class PaymentCapture:
         except Exception as e:
             logger.error(f"Failed to get database pool: {e}")
             return None
+
+    def _get_tenant_pool(self, tenant_id: str | None):
+        """Get tenant scoped pool for new collection intelligence operations."""
+        resolved_tenant = (tenant_id or "").strip() or os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
+        if not resolved_tenant:
+            return self._get_pool()
+        try:
+            from database.async_connection import get_tenant_pool
+
+            return get_tenant_pool(resolved_tenant)
+        except Exception as exc:
+            logger.warning("Tenant pool unavailable for %s: %s", resolved_tenant, exc)
+            return self._get_pool()
 
     def _get_stripe(self):
         """Get Stripe client."""
@@ -799,13 +814,204 @@ BrainOps Team""",
                 failed += 1
                 logger.warning("Payment retry failed for invoice %s: %s", invoice_id, exc)
 
-        return {
+        result = {
             "status": "completed",
             "max_attempts": PAYMENT_RETRY_MAX_ATTEMPTS,
             "evaluated": len(invoices),
             "retried": retried,
             "skipped": skipped,
             "failed": failed,
+        }
+        if ENABLE_PAYMENT_FOLLOWUP_ESCALATION:
+            result["followup_escalation"] = await self.schedule_collection_followups(
+                max_invoices=max(1, max_invoices)
+            )
+        return result
+
+    async def schedule_collection_followups(
+        self,
+        max_invoices: int = 50,
+        tenant_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Schedule escalated collection followups for overdue invoices."""
+        if not ENABLE_PAYMENT_FOLLOWUP_ESCALATION:
+            return {"status": "skipped", "reason": "PAYMENT_CAPTURE_ENABLE_FOLLOWUP_ESCALATION=false"}
+
+        pool = self._get_tenant_pool(tenant_id)
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        rows = await pool.fetch(
+            """
+            WITH attempts AS (
+                SELECT
+                    action_data->>'invoice_id' AS invoice_id,
+                    COUNT(*) AS retries
+                FROM revenue_actions
+                WHERE action_type = 'payment_retry_attempt'
+                GROUP BY action_data->>'invoice_id'
+            )
+            SELECT
+                i.id,
+                i.lead_id,
+                i.amount,
+                i.due_date,
+                i.status,
+                p.client_email,
+                p.client_name,
+                COALESCE(a.retries, 0) AS retries,
+                GREATEST(0, EXTRACT(DAY FROM (NOW() - i.due_date))) AS days_overdue
+            FROM ai_invoices i
+            LEFT JOIN ai_proposals p ON p.id = i.proposal_id
+            LEFT JOIN attempts a ON a.invoice_id = i.id::text
+            WHERE i.status IN ('pending', 'sent', 'partial')
+              AND i.due_date <= NOW()
+            ORDER BY days_overdue DESC, retries DESC
+            LIMIT $1
+            """,
+            max(1, max_invoices),
+        )
+
+        now = datetime.now(timezone.utc)
+        scheduled = 0
+        escalated = 0
+        for row in rows:
+            invoice_id = str(row["id"])
+            retries = int(row.get("retries") or 0)
+            days_overdue = float(row.get("days_overdue") or 0.0)
+            escalation_level = min(3, max(1, retries + (1 if days_overdue >= 7 else 0)))
+            template = f"collection_escalation_{escalation_level}"
+            due_suffix = f"{int(days_overdue)}d_overdue" if days_overdue > 0 else "due_today"
+
+            exists = await pool.fetchval(
+                """
+                SELECT target_id
+                FROM ai_scheduled_outreach
+                WHERE target_id = $1
+                  AND message_template = $2
+                  AND status IN ('scheduled', 'queued')
+                  AND created_at > NOW() - INTERVAL '12 hours'
+                LIMIT 1
+                """,
+                invoice_id,
+                template,
+            )
+            if exists:
+                continue
+
+            scheduled_for = now + timedelta(hours=3 if escalation_level >= 3 else 12)
+            await pool.execute(
+                """
+                INSERT INTO ai_scheduled_outreach
+                (target_id, channel, message_template, personalization, scheduled_for, status, metadata, created_at)
+                VALUES ($1, 'email', $2, $3, $4, 'scheduled', $5, $6)
+                """,
+                invoice_id,
+                template,
+                json.dumps(
+                    {
+                        "invoice_id": invoice_id,
+                        "client_name": row.get("client_name"),
+                        "client_email": row.get("client_email"),
+                        "amount": float(row.get("amount") or 0.0),
+                        "retries": retries,
+                        "days_overdue": days_overdue,
+                    }
+                ),
+                scheduled_for,
+                json.dumps(
+                    {
+                        "source": "payment_capture",
+                        "escalation_level": escalation_level,
+                        "due_state": due_suffix,
+                    }
+                ),
+                now,
+            )
+
+            await pool.execute(
+                """
+                INSERT INTO revenue_actions
+                (id, lead_id, action_type, action_data, success, created_at, executed_by)
+                VALUES ($1, $2, 'collection_followup_escalation', $3, true, $4, 'system:payment_capture')
+                """,
+                uuid.uuid4(),
+                row["lead_id"],
+                {
+                    "invoice_id": invoice_id,
+                    "escalation_level": escalation_level,
+                    "days_overdue": days_overdue,
+                    "retry_count": retries,
+                    "scheduled_for": scheduled_for.isoformat(),
+                },
+                now,
+            )
+            scheduled += 1
+            if escalation_level >= 2:
+                escalated += 1
+
+        return {
+            "status": "completed",
+            "evaluated": len(rows),
+            "scheduled": scheduled,
+            "escalated": escalated,
+        }
+
+    async def get_collection_forecast(
+        self,
+        tenant_id: str | None = None,
+        horizon_days: int = 30,
+    ) -> dict[str, Any]:
+        """Forecast expected collections from open invoices."""
+        if not ENABLE_COLLECTION_FORECAST:
+            return {"status": "skipped", "reason": "PAYMENT_CAPTURE_ENABLE_COLLECTION_FORECAST=false"}
+
+        pool = self._get_tenant_pool(tenant_id)
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        rows = await pool.fetch(
+            """
+            SELECT id, amount, due_date, status
+            FROM ai_invoices
+            WHERE status IN ('pending', 'sent', 'partial')
+              AND COALESCE(due_date, NOW()) <= NOW() + ($1::text || ' days')::interval
+            ORDER BY due_date ASC NULLS LAST
+            LIMIT 500
+            """,
+            max(7, horizon_days),
+        )
+
+        now = datetime.now(timezone.utc)
+        total_open = 0.0
+        expected_collection = 0.0
+        buckets: dict[str, float] = {"current": 0.0, "overdue_1_7": 0.0, "overdue_8_plus": 0.0}
+        for row in rows:
+            amount = float(row.get("amount") or 0.0)
+            total_open += amount
+            due_date = row.get("due_date")
+            days_overdue = 0.0
+            if due_date:
+                days_overdue = (now - due_date).total_seconds() / 86400.0
+            if days_overdue <= 0:
+                probability = 0.85
+                buckets["current"] += amount
+            elif days_overdue <= 7:
+                probability = 0.60
+                buckets["overdue_1_7"] += amount
+            else:
+                probability = 0.35
+                buckets["overdue_8_plus"] += amount
+            expected_collection += amount * probability
+
+        return {
+            "status": "completed",
+            "horizon_days": horizon_days,
+            "open_invoice_count": len(rows),
+            "open_amount": round(total_open, 2),
+            "expected_collection": round(expected_collection, 2),
+            "bucket_amounts": {k: round(v, 2) for k, v in buckets.items()},
+            "generated_at": now.isoformat(),
         }
 
     async def handle_stripe_webhook(
@@ -890,7 +1096,8 @@ BrainOps Team""",
             "total_paid_invoices": row["total_paid"] if row else 0,
             "total_real_revenue": float(row["total_revenue"] or 0) if row else 0,
             "total_collected_including_partials": float(partial_collected or 0),
-            "data_mode": "REAL_ONLY" if real_only else "ALL_DATA"
+            "data_mode": "REAL_ONLY" if real_only else "ALL_DATA",
+            "collection_forecast": await self.get_collection_forecast(),
         }
 
 

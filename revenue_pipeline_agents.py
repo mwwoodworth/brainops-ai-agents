@@ -15,13 +15,22 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from database.async_connection import get_pool, DatabaseUnavailableError
+from database.async_connection import get_pool, get_tenant_pool, DatabaseUnavailableError
 
 logger = logging.getLogger(__name__)
+
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_REVENUE_AGENT_FOLLOWUP_ESCALATION = _env_flag("ENABLE_REVENUE_AGENT_FOLLOWUP_ESCALATION", "false")
+ENABLE_REVENUE_AGENT_WIN_LOSS_FEEDBACK = _env_flag("ENABLE_REVENUE_AGENT_WIN_LOSS_FEEDBACK", "false")
 
 
 def _safe_get_pool():
@@ -34,6 +43,17 @@ def _safe_get_pool():
     except Exception as e:
         logger.error(f"Unexpected error getting pool: {e}")
         raise
+
+
+def _safe_get_tenant_pool(tenant_id: str | None = None):
+    resolved_tenant = (tenant_id or "").strip() or os.getenv("DEFAULT_TENANT_ID") or os.getenv("TENANT_ID")
+    if not resolved_tenant:
+        return _safe_get_pool()
+    try:
+        return get_tenant_pool(resolved_tenant)
+    except Exception as exc:
+        logger.warning("Falling back to base pool for tenant %s: %s", resolved_tenant, exc)
+        return _safe_get_pool()
 
 
 class BaseAgent:
@@ -408,6 +428,16 @@ class NurtureExecutorAgentReal(BaseAgent):
                 return await self.create_nurture_sequence(lead_id, sequence_type)
             elif action == 'queue_emails':
                 return await self.queue_pending_emails()
+            elif action == 'schedule_followups':
+                return await self.schedule_followup_escalations(
+                    tenant_id=task.get("tenant_id"),
+                    limit=int(task.get("limit", 100)),
+                )
+            elif action == 'analyze_win_loss':
+                return await self.analyze_win_loss_feedback(
+                    tenant_id=task.get("tenant_id"),
+                    lookback_days=int(task.get("lookback_days", 90)),
+                )
             else:
                 return await self.nurture_new_leads()
         except Exception as e:
@@ -760,6 +790,188 @@ class NurtureExecutorAgentReal(BaseAgent):
         except Exception as e:
             self.logger.error(f"Queue pending emails failed: {e}")
             return {"status": "error", "error": str(e)}
+
+    async def schedule_followup_escalations(
+        self,
+        tenant_id: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Schedule follow-ups for stale lifecycle stages with escalation levels."""
+        if not ENABLE_REVENUE_AGENT_FOLLOWUP_ESCALATION:
+            return {"status": "skipped", "reason": "ENABLE_REVENUE_AGENT_FOLLOWUP_ESCALATION=false"}
+
+        pool = _safe_get_tenant_pool(tenant_id)
+        rows = await pool.fetch(
+            """
+            SELECT
+                id,
+                stage,
+                email,
+                company_name,
+                COALESCE(last_contact, updated_at, created_at) as last_touch_at,
+                EXTRACT(DAY FROM (NOW() - COALESCE(last_contact, updated_at, created_at))) as days_since_touch
+            FROM revenue_leads
+            WHERE stage IN ('contacted', 'outreach_sent', 'qualified', 'proposal_sent', 'negotiating', 'invoiced')
+              AND email IS NOT NULL
+            ORDER BY days_since_touch DESC NULLS LAST
+            LIMIT $1
+            """,
+            max(1, limit),
+        )
+
+        thresholds = {
+            "contacted": 3,
+            "outreach_sent": 3,
+            "qualified": 2,
+            "proposal_sent": 2,
+            "negotiating": 1,
+            "invoiced": 1,
+        }
+        scheduled = 0
+        escalated = 0
+        now = datetime.now(timezone.utc)
+
+        for row in rows:
+            stage = str(row.get("stage") or "").lower()
+            days_since_touch = float(row.get("days_since_touch") or 0.0)
+            threshold = float(thresholds.get(stage, 3))
+            if days_since_touch < threshold:
+                continue
+
+            escalation_level = max(1, min(3, int(days_since_touch // threshold)))
+            scheduled_for = now + timedelta(hours=6 if escalation_level >= 3 else 18)
+
+            exists = await pool.fetchval(
+                """
+                SELECT target_id
+                FROM ai_scheduled_outreach
+                WHERE target_id = $1
+                  AND status IN ('scheduled', 'queued')
+                  AND message_template = $2
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                LIMIT 1
+                """,
+                str(row["id"]),
+                f"nurture_followup_{stage}",
+            )
+            if exists:
+                continue
+
+            await pool.execute(
+                """
+                INSERT INTO ai_scheduled_outreach
+                (target_id, channel, message_template, personalization, scheduled_for, status, metadata, created_at)
+                VALUES ($1, 'email', $2, $3, $4, 'scheduled', $5, $6)
+                """,
+                str(row["id"]),
+                f"nurture_followup_{stage}",
+                json.dumps(
+                    {
+                        "lead_id": str(row["id"]),
+                        "company_name": row.get("company_name"),
+                        "stage": stage,
+                        "escalation_level": escalation_level,
+                    }
+                ),
+                scheduled_for,
+                json.dumps(
+                    {
+                        "source": "revenue_pipeline_agents",
+                        "escalation_level": escalation_level,
+                        "days_since_touch": days_since_touch,
+                    }
+                ),
+                now,
+            )
+            scheduled += 1
+            if escalation_level >= 2:
+                escalated += 1
+
+        return {
+            "status": "completed",
+            "evaluated": len(rows),
+            "scheduled": scheduled,
+            "escalated": escalated,
+        }
+
+    async def analyze_win_loss_feedback(
+        self,
+        tenant_id: str | None = None,
+        lookback_days: int = 90,
+    ) -> dict[str, Any]:
+        """Create a compact win/loss learning snapshot from recent closed leads."""
+        if not ENABLE_REVENUE_AGENT_WIN_LOSS_FEEDBACK:
+            return {"status": "skipped", "reason": "ENABLE_REVENUE_AGENT_WIN_LOSS_FEEDBACK=false"}
+
+        pool = _safe_get_tenant_pool(tenant_id)
+        rows = await pool.fetch(
+            """
+            SELECT id, stage, source, industry, value_estimate, metadata
+            FROM revenue_leads
+            WHERE updated_at > NOW() - ($1::text || ' days')::interval
+              AND stage IN ('won', 'paid', 'lost', 'invoiced', 'won_invoice_pending')
+            """,
+            max(7, lookback_days),
+        )
+
+        total = len(rows)
+        wins = 0
+        losses = 0
+        top_loss_reasons: dict[str, int] = {}
+        total_value_won = 0.0
+        total_value_lost = 0.0
+        for row in rows:
+            stage = str(row.get("stage") or "").lower()
+            value = float(row.get("value_estimate") or 0.0)
+            is_win = stage in {"won", "paid", "invoiced", "won_invoice_pending"}
+            if is_win:
+                wins += 1
+                total_value_won += value
+            else:
+                losses += 1
+                total_value_lost += value
+                metadata = row.get("metadata")
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except json.JSONDecodeError:
+                        metadata = {}
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                reason = str(metadata.get("loss_reason") or metadata.get("closed_lost_reason") or "unspecified")
+                top_loss_reasons[reason] = int(top_loss_reasons.get(reason, 0)) + 1
+
+        summary = {
+            "status": "completed",
+            "lookback_days": lookback_days,
+            "total_closed": total,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": (wins / total) if total else 0.0,
+            "total_value_won": total_value_won,
+            "total_value_lost": total_value_lost,
+            "top_loss_reasons": sorted(
+                [{"reason": key, "count": value} for key, value in top_loss_reasons.items()],
+                key=lambda item: item["count"],
+                reverse=True,
+            )[:5],
+            "analyzed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if rows:
+            await pool.execute(
+                """
+                INSERT INTO revenue_actions
+                (id, lead_id, action_type, action_data, success, created_at, executed_by)
+                VALUES ($1, $2, 'win_loss_feedback', $3, true, $4, 'system:nurture_executor')
+                """,
+                uuid.uuid4(),
+                rows[0]["id"],
+                json.dumps(summary),
+                datetime.now(timezone.utc),
+            )
+
+        return summary
 
 
 # Export for use in agent_executor.py

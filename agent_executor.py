@@ -78,6 +78,13 @@ ENABLE_AGENT_EXECUTION_BUDGETS = _env_flag("ENABLE_AGENT_EXECUTION_BUDGETS", Fal
 ENABLE_AGENT_RESULT_AGGREGATION = _env_flag("ENABLE_AGENT_RESULT_AGGREGATION", False)
 ENABLE_LANGCHAIN_CHAIN_PATTERNS = _env_flag("ENABLE_LANGCHAIN_CHAIN_PATTERNS", False)
 
+# Deep intelligence enhancements (default OFF)
+ENABLE_AGENT_PERFORMANCE_BENCHMARKING = _env_flag("ENABLE_AGENT_PERFORMANCE_BENCHMARKING", False)
+ENABLE_DYNAMIC_AGENT_SELECTION = _env_flag("ENABLE_DYNAMIC_AGENT_SELECTION", False)
+ENABLE_AGENT_COLLABORATION_PROTOCOL = _env_flag("ENABLE_AGENT_COLLABORATION_PROTOCOL", False)
+ENABLE_PROGRESSIVE_COMPLEXITY_ROUTING = _env_flag("ENABLE_PROGRESSIVE_COMPLEXITY_ROUTING", False)
+ENABLE_AGENT_HEALTH_AUTORECOVERY = _env_flag("ENABLE_AGENT_HEALTH_AUTORECOVERY", False)
+
 
 def _handle_optional_import(feature: str, exc: Exception) -> None:
     if STRICT_STARTUP:
@@ -496,6 +503,9 @@ class AgentExecutor:
         self._capability_registry: dict[str, set[str]] = {}
         self._capability_registry_updated_at: Optional[datetime] = None
         self._langchain_runtime: Optional[LangChainEnhancementRuntime] = None
+        self._agent_performance_cache: dict[str, dict[str, Any]] = {}
+        self._agent_performance_cache_updated_at: Optional[datetime] = None
+        self._agent_health_state: dict[str, dict[str, Any]] = {}
         self._default_tenant_id = (
             os.getenv("DEFAULT_TENANT_ID")
             or os.getenv("TENANT_ID")
@@ -643,6 +653,269 @@ class AgentExecutor:
         """Resolve tenant id for scoped orchestration queries."""
         tenant_id = (task.get("tenant_id") or "").strip() if isinstance(task, dict) else ""
         return tenant_id or self._default_tenant_id
+
+    def _estimate_task_complexity(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Estimate task complexity for progressive routing decisions."""
+        try:
+            payload = json.dumps(task, default=str)
+        except Exception:
+            payload = str(task)
+        size = len(payload)
+        action = str(task.get("action") or task.get("type") or "").lower()
+        requested_caps = task.get("required_capabilities") or task.get("capabilities") or []
+        if isinstance(requested_caps, str):
+            requested_caps = [requested_caps]
+        capability_count = len([c for c in requested_caps if c])
+        multi_step_tokens = sum(
+            1 for token in ("and", "then", "after", "workflow", "multi", "sequence", "orchestrate")
+            if token in action
+        )
+        score = 0.0
+        score += min(4.0, size / 1500.0)
+        score += min(2.0, capability_count * 0.5)
+        score += min(2.0, float(multi_step_tokens) * 0.5)
+        if task.get("use_langgraph") or task.get("quality_gate"):
+            score += 1.5
+        if task.get("multi_agent") or task.get("collaborative") or task.get("delegate_to"):
+            score += 1.5
+
+        if score < 2.5:
+            level = "simple"
+        elif score < 5.0:
+            level = "moderate"
+        else:
+            level = "complex"
+        return {"level": level, "score": round(score, 3), "payload_size": size}
+
+    async def _load_agent_performance_snapshot(self, tenant_id: str) -> dict[str, dict[str, Any]]:
+        """Load per-agent benchmark metrics from recent execution history."""
+        if not ENABLE_AGENT_PERFORMANCE_BENCHMARKING:
+            return {}
+        if (
+            self._agent_performance_cache
+            and self._agent_performance_cache_updated_at
+            and (datetime.now(timezone.utc) - self._agent_performance_cache_updated_at).total_seconds() < 120
+        ):
+            return self._agent_performance_cache
+
+        snapshot: dict[str, dict[str, Any]] = {}
+        try:
+            tenant_pool = get_tenant_pool(tenant_id)
+            rows = await tenant_pool.fetch(
+                """
+                SELECT
+                    agent_name,
+                    COUNT(*) AS total_runs,
+                    COUNT(*) FILTER (WHERE status = 'completed') AS successful_runs,
+                    COALESCE(AVG(execution_time_ms), 0) AS avg_execution_ms,
+                    COALESCE(
+                        AVG(
+                            CASE
+                                WHEN output_data ? 'quality_score'
+                                THEN (output_data->>'quality_score')::numeric
+                                WHEN output_data ? 'quality_report' AND (output_data->'quality_report') ? 'score'
+                                THEN ((output_data->'quality_report')->>'score')::numeric
+                                ELSE NULL
+                            END
+                        ),
+                        NULL
+                    ) AS avg_quality_score
+                FROM ai_agent_executions
+                WHERE created_at > NOW() - INTERVAL '14 days'
+                GROUP BY agent_name
+                """
+            )
+            for row in rows:
+                total_runs = int(row.get("total_runs") or 0)
+                successful_runs = int(row.get("successful_runs") or 0)
+                success_rate = (successful_runs / total_runs) if total_runs else 0.0
+                avg_execution_ms = float(row.get("avg_execution_ms") or 0.0)
+                avg_quality_score = row.get("avg_quality_score")
+                if avg_quality_score is None:
+                    avg_quality_score = max(0.0, min(100.0, success_rate * 100.0))
+                score = (
+                    (success_rate * 0.55)
+                    + (max(0.0, min(1.0, 1.0 - (avg_execution_ms / 30000.0))) * 0.20)
+                    + ((float(avg_quality_score) / 100.0) * 0.25)
+                )
+                snapshot[str(row["agent_name"])] = {
+                    "success_rate": round(success_rate, 4),
+                    "avg_execution_ms": round(avg_execution_ms, 2),
+                    "avg_quality_score": round(float(avg_quality_score), 2),
+                    "composite_score": round(score, 4),
+                    "total_runs": total_runs,
+                }
+        except Exception as exc:
+            logger.warning("Agent performance snapshot load failed: %s", exc)
+            snapshot = self._agent_performance_cache or {}
+
+        self._agent_performance_cache = snapshot
+        self._agent_performance_cache_updated_at = datetime.now(timezone.utc)
+        return snapshot
+
+    async def _select_agent_from_performance(
+        self,
+        requested_agent_name: str,
+        task: dict[str, Any],
+    ) -> tuple[str, dict[str, Any]]:
+        """Select best-fit agent using capabilities + historical benchmark performance."""
+        if not ENABLE_DYNAMIC_AGENT_SELECTION:
+            return requested_agent_name, {"enabled": False}
+
+        tenant_id = self._resolve_tenant_for_task(task)
+        registry = await self._build_capability_registry(tenant_id)
+        performance = await self._load_agent_performance_snapshot(tenant_id)
+        required = self._extract_required_capabilities(task)
+        complexity = self._estimate_task_complexity(task)
+
+        if not registry:
+            return requested_agent_name, {"enabled": True, "reason": "empty_registry"}
+
+        candidates = []
+        for agent_name, capabilities in registry.items():
+            cap_match = len(required.intersection(capabilities))
+            if required and cap_match == 0 and agent_name != requested_agent_name:
+                continue
+            perf = performance.get(agent_name, {})
+            perf_score = float(perf.get("composite_score", 0.5))
+            success_rate = float(perf.get("success_rate", 0.5))
+            avg_ms = float(perf.get("avg_execution_ms", 10000.0))
+            speed_score = max(0.0, min(1.0, 1.0 - (avg_ms / 30000.0)))
+            complexity_weight = 0.70 if complexity["level"] == "complex" else 0.45
+            score = (
+                (cap_match * 0.20)
+                + (perf_score * complexity_weight)
+                + (success_rate * 0.20)
+                + (speed_score * (0.15 if complexity["level"] == "simple" else 0.05))
+            )
+            candidates.append((agent_name, score, cap_match, perf))
+
+        if not candidates:
+            return requested_agent_name, {"enabled": True, "reason": "no_candidates"}
+
+        candidates.sort(key=lambda item: item[1], reverse=True)
+        selected = candidates[0][0]
+        metadata = {
+            "enabled": True,
+            "complexity": complexity,
+            "selected_score": round(candidates[0][1], 4),
+            "selected_capability_match": candidates[0][2],
+            "selected_performance": candidates[0][3],
+            "candidate_count": len(candidates),
+        }
+        return selected, metadata
+
+    def _build_collaboration_protocol_plan(
+        self,
+        primary_agent: str,
+        task: dict[str, Any],
+        complexity: dict[str, Any],
+    ) -> list[str]:
+        """Generate helper-agent suggestions for collaboration protocol."""
+        if not ENABLE_AGENT_COLLABORATION_PROTOCOL:
+            return []
+        if task.get("delegate_to"):
+            raw = task.get("delegate_to")
+            if isinstance(raw, (list, tuple, set)):
+                return [str(item) for item in raw if item]
+            if isinstance(raw, str):
+                return [raw]
+
+        helpers: list[str] = []
+        action = str(task.get("action") or task.get("type") or "").lower()
+        if complexity.get("level") == "complex":
+            if "analy" in action or "report" in action:
+                helpers.extend(["PredictiveAnalyzer", "ReportingAgent"])
+            if "deploy" in action or "infra" in action:
+                helpers.extend(["DevOpsAgent", "SystemMonitor"])
+            if "revenue" in action or "lead" in action:
+                helpers.extend(["RevenueOptimizer", "CustomerIntelligence"])
+            if not helpers:
+                helpers.extend(["WorkflowAutomation", "Monitor"])
+        elif complexity.get("level") == "moderate" and "risk" in action:
+            helpers.extend(["Monitor"])
+
+        deduped = []
+        for helper in [primary_agent, *helpers]:
+            if helper in self.agents and helper not in deduped:
+                deduped.append(helper)
+        return deduped
+
+    async def _evaluate_agent_health_and_recover(self, agent_name: str, tenant_id: str) -> dict[str, Any]:
+        """Detect degraded agents and trigger lightweight auto-recovery when enabled."""
+        if not ENABLE_AGENT_HEALTH_AUTORECOVERY:
+            return {"enabled": False}
+
+        degraded = False
+        reason = ""
+        failure_rate = 0.0
+        try:
+            tenant_pool = get_tenant_pool(tenant_id)
+            row = await tenant_pool.fetchrow(
+                """
+                SELECT
+                    COUNT(*) AS total_runs,
+                    COUNT(*) FILTER (WHERE status IN ('failed', 'error')) AS failed_runs
+                FROM ai_agent_executions
+                WHERE agent_name = $1
+                  AND created_at > NOW() - INTERVAL '2 hours'
+                """,
+                agent_name,
+            )
+            total_runs = int(row.get("total_runs") or 0) if row else 0
+            failed_runs = int(row.get("failed_runs") or 0) if row else 0
+            failure_rate = (failed_runs / total_runs) if total_runs else 0.0
+            degraded = total_runs >= 3 and failure_rate >= 0.5
+            if degraded:
+                reason = f"recent_failure_rate={failure_rate:.2f}"
+        except Exception as exc:
+            logger.warning("Agent health check failed for %s: %s", agent_name, exc)
+            return {"enabled": True, "status": "unknown", "error": str(exc)}
+
+        recovery_performed = False
+        if degraded and agent_name in self.agents:
+            try:
+                # Auto-recovery strategy: reset agent instance from implementation registry.
+                self._load_agent_implementations()
+                recovery_performed = True
+                logger.warning(
+                    "Auto-recovery reloaded agent implementations due to degraded agent %s (%s)",
+                    agent_name,
+                    reason,
+                )
+            except Exception as exc:
+                logger.error("Auto-recovery failed for %s: %s", agent_name, exc)
+
+        state = {
+            "enabled": True,
+            "agent": agent_name,
+            "degraded": degraded,
+            "failure_rate": round(failure_rate, 4),
+            "reason": reason,
+            "recovery_performed": recovery_performed,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._agent_health_state[agent_name] = state
+        return state
+
+    async def get_agent_benchmark_report(self, tenant_id: Optional[str] = None) -> dict[str, Any]:
+        """Return benchmark metrics used for dynamic selection and health-aware routing."""
+        resolved_tenant = (tenant_id or "").strip() or self._default_tenant_id
+        snapshot = await self._load_agent_performance_snapshot(resolved_tenant)
+        ordered = sorted(
+            (
+                {"agent": agent_name, **metrics}
+                for agent_name, metrics in snapshot.items()
+            ),
+            key=lambda row: row.get("composite_score", 0),
+            reverse=True,
+        )
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "tenant_id": resolved_tenant,
+            "agents": ordered,
+            "health_state": self._agent_health_state,
+        }
 
     def _infer_agent_capabilities(self, agent_name: str, agent: BaseAgent | None = None) -> set[str]:
         """Infer capabilities for an agent using explicit declarations and naming heuristics."""
@@ -905,22 +1178,79 @@ class AgentExecutor:
         task: dict[str, Any],
     ) -> dict[str, Any]:
         """Execute with capability routing, delegation, and aggregation when enabled."""
-        routed_agent = await self._route_agent_by_capability(requested_agent_name, task)
+        orchestration_task = dict(task)
+        tenant_id = self._resolve_tenant_for_task(orchestration_task)
+        complexity = self._estimate_task_complexity(orchestration_task)
+        routed_agent = await self._route_agent_by_capability(requested_agent_name, orchestration_task)
+
+        dynamic_selection_meta: dict[str, Any] = {"enabled": False}
+        if ENABLE_DYNAMIC_AGENT_SELECTION:
+            selected_agent, dynamic_selection_meta = await self._select_agent_from_performance(
+                routed_agent,
+                orchestration_task,
+            )
+            if selected_agent in self.agents:
+                routed_agent = selected_agent
+
+        health_meta = await self._evaluate_agent_health_and_recover(routed_agent, tenant_id)
 
         collaboration_requested = bool(
-            task.get("multi_agent")
-            or task.get("collaborative")
-            or task.get("delegation_plan")
-            or task.get("delegate_to")
+            orchestration_task.get("multi_agent")
+            or orchestration_task.get("collaborative")
+            or orchestration_task.get("delegation_plan")
+            or orchestration_task.get("delegate_to")
         )
 
-        if not (ENABLE_MULTI_AGENT_COLLABORATION and collaboration_requested):
-            return await self._execute_single_agent_with_budget(routed_agent, task)
+        if ENABLE_PROGRESSIVE_COMPLEXITY_ROUTING and complexity["level"] == "simple":
+            orchestration_task.setdefault("_skip_langchain_runtime", True)
+            orchestration_task.setdefault("_skip_memory_enforcement", True)
+            orchestration_task.setdefault("_skip_repair_loop", True)
+            result = await self._execute_single_agent_with_budget(routed_agent, orchestration_task)
+            if isinstance(result, dict):
+                result.setdefault("_orchestration", {})
+                result["_orchestration"].update(
+                    {
+                        "complexity": complexity,
+                        "complexity_mode": "fast_track",
+                        "dynamic_selection": dynamic_selection_meta,
+                        "health": health_meta,
+                    }
+                )
+            return result
 
-        delegation_plan = task.get("delegation_plan")
+        if ENABLE_AGENT_COLLABORATION_PROTOCOL:
+            helpers = self._build_collaboration_protocol_plan(
+                routed_agent,
+                orchestration_task,
+                complexity,
+            )
+            if helpers and not orchestration_task.get("delegate_to"):
+                orchestration_task["delegate_to"] = helpers
+            if complexity["level"] == "complex" and len(helpers) > 1:
+                collaboration_requested = True
+
+        if ENABLE_PROGRESSIVE_COMPLEXITY_ROUTING and complexity["level"] == "complex":
+            collaboration_requested = True
+            orchestration_task.setdefault("multi_agent", True)
+
+        if not (ENABLE_MULTI_AGENT_COLLABORATION and collaboration_requested):
+            result = await self._execute_single_agent_with_budget(routed_agent, orchestration_task)
+            if isinstance(result, dict):
+                result.setdefault("_orchestration", {})
+                result["_orchestration"].update(
+                    {
+                        "complexity": complexity,
+                        "complexity_mode": "single_agent",
+                        "dynamic_selection": dynamic_selection_meta,
+                        "health": health_meta,
+                    }
+                )
+            return result
+
+        delegation_plan = orchestration_task.get("delegation_plan")
         collaborator_names: list[str] = []
-        if isinstance(task.get("delegate_to"), (list, tuple, set)):
-            collaborator_names.extend(str(item) for item in task["delegate_to"] if item)
+        if isinstance(orchestration_task.get("delegate_to"), (list, tuple, set)):
+            collaborator_names.extend(str(item) for item in orchestration_task["delegate_to"] if item)
         if routed_agent not in collaborator_names:
             collaborator_names.insert(0, routed_agent)
 
@@ -930,7 +1260,7 @@ class AgentExecutor:
                 if not isinstance(item, dict):
                     continue
                 delegated_agent = str(item.get("agent") or routed_agent)
-                delegated_task = dict(task)
+                delegated_task = dict(orchestration_task)
                 delegated_task.update(item.get("task") if isinstance(item.get("task"), dict) else {})
                 delegated_task["_skip_multi_agent"] = True
                 delegated_task["_skip_langchain_runtime"] = True
@@ -941,7 +1271,7 @@ class AgentExecutor:
                 collaborator_names = [routed_agent]
             plan_items = []
             for collaborator in collaborator_names:
-                delegated_task = dict(task)
+                delegated_task = dict(orchestration_task)
                 delegated_task["_skip_multi_agent"] = True
                 delegated_task["_skip_langchain_runtime"] = True
                 delegated_task["_delegated_from"] = requested_agent_name
@@ -956,7 +1286,7 @@ class AgentExecutor:
 
         max_concurrency = max(
             1,
-            int(task.get("max_collaborators") or os.getenv("AGENT_COLLABORATION_MAX_CONCURRENCY", "4")),
+            int(orchestration_task.get("max_collaborators") or os.getenv("AGENT_COLLABORATION_MAX_CONCURRENCY", "4")),
         )
         semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -972,7 +1302,7 @@ class AgentExecutor:
             }
 
         execution_results = await asyncio.gather(*[_run_plan_item(item) for item in plan_items])
-        aggregation_strategy = str(task.get("aggregation_strategy") or "merge_dict")
+        aggregation_strategy = str(orchestration_task.get("aggregation_strategy") or "merge_dict")
         aggregated = self._aggregate_collaboration_results(execution_results, aggregation_strategy)
 
         if isinstance(aggregated.get("selected_result"), dict):
@@ -994,6 +1324,11 @@ class AgentExecutor:
                 "capability_routing_enabled": ENABLE_AGENT_CAPABILITY_ROUTING,
                 "multi_agent_enabled": ENABLE_MULTI_AGENT_COLLABORATION,
                 "execution_budgets_enabled": ENABLE_AGENT_EXECUTION_BUDGETS,
+                "complexity": complexity,
+                "complexity_mode": "multi_agent",
+                "dynamic_selection": dynamic_selection_meta,
+                "health": health_meta,
+                "collaboration_protocol": ENABLE_AGENT_COLLABORATION_PROTOCOL,
             },
         }
 
@@ -1724,6 +2059,66 @@ class AgentExecutor:
         except Exception as e:
             logger.debug("Context event emission failed (non-fatal): %s", e)
 
+    @staticmethod
+    def _extract_quality_score(result: dict[str, Any] | None) -> float | None:
+        """Extract quality score from common result payload shapes."""
+        if not isinstance(result, dict):
+            return None
+        if isinstance(result.get("quality_score"), (int, float)):
+            return float(result["quality_score"])
+        report = result.get("quality_report")
+        if isinstance(report, dict) and isinstance(report.get("score"), (int, float)):
+            return float(report.get("score"))
+        return None
+
+    def _update_agent_benchmark_cache(
+        self,
+        agent_name: str,
+        status: str,
+        duration_ms: float | None,
+        result: dict[str, Any] | None,
+    ) -> None:
+        """Maintain rolling benchmark metrics in-memory for fast dynamic selection."""
+        if not ENABLE_AGENT_PERFORMANCE_BENCHMARKING:
+            return
+        metrics = self._agent_performance_cache.get(agent_name) or {
+            "total_runs": 0,
+            "successful_runs": 0,
+            "avg_execution_ms": 0.0,
+            "avg_quality_score": 75.0,
+            "success_rate": 0.0,
+            "composite_score": 0.0,
+        }
+        total_runs = int(metrics.get("total_runs", 0)) + 1
+        successful_runs = int(metrics.get("successful_runs", 0)) + (1 if status == "completed" else 0)
+        prev_avg_ms = float(metrics.get("avg_execution_ms", 0.0))
+        current_ms = float(duration_ms or 0.0)
+        avg_execution_ms = ((prev_avg_ms * (total_runs - 1)) + current_ms) / max(1, total_runs)
+
+        quality_score = self._extract_quality_score(result)
+        prev_quality = float(metrics.get("avg_quality_score", 75.0))
+        avg_quality = (
+            ((prev_quality * (total_runs - 1)) + quality_score) / max(1, total_runs)
+            if quality_score is not None
+            else prev_quality
+        )
+        success_rate = successful_runs / max(1, total_runs)
+        composite = (
+            (success_rate * 0.55)
+            + (max(0.0, min(1.0, 1.0 - (avg_execution_ms / 30000.0))) * 0.20)
+            + ((max(0.0, min(100.0, avg_quality)) / 100.0) * 0.25)
+        )
+        self._agent_performance_cache[agent_name] = {
+            "total_runs": total_runs,
+            "successful_runs": successful_runs,
+            "avg_execution_ms": round(avg_execution_ms, 2),
+            "avg_quality_score": round(avg_quality, 2),
+            "success_rate": round(success_rate, 4),
+            "composite_score": round(composite, 4),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._agent_performance_cache_updated_at = datetime.now(timezone.utc)
+
     async def _log_ai_agent_execution_end(
         self,
         execution_id: str,
@@ -1779,6 +2174,7 @@ class AgentExecutor:
                 },
                 task.get("tenant_id"),
             )
+            self._update_agent_benchmark_cache(agent_name, status, duration_ms, result)
         except Exception as e:
             logger.warning(f"Failed to log execution completion to ai_agent_executions: {e!r}")
 
@@ -2358,6 +2754,47 @@ class AgentExecutor:
                             success=True,
                         )
                     attempt + 1
+
+                    if (
+                        ENABLE_AGENT_COLLABORATION_PROTOCOL
+                        and isinstance(result, dict)
+                        and not task.get("_help_request_processed")
+                    ):
+                        help_request = result.get("help_request") or result.get("request_help")
+                        help_needed = bool(help_request) or bool(result.get("needs_help"))
+                        if help_needed:
+                            helper_agents: list[str] = []
+                            if isinstance(help_request, dict):
+                                hinted_agents = help_request.get("agents")
+                                if isinstance(hinted_agents, (list, tuple, set)):
+                                    helper_agents.extend(str(item) for item in hinted_agents if item)
+                            if not helper_agents:
+                                helper_agents = self._build_collaboration_protocol_plan(
+                                    resolved_agent_name,
+                                    task,
+                                    self._estimate_task_complexity(task),
+                                )
+                            helper_agents = [a for a in helper_agents if a in self.agents]
+                            if len(helper_agents) > 1:
+                                help_task = dict(task)
+                                help_task.update(
+                                    {
+                                        "multi_agent": True,
+                                        "collaborative": True,
+                                        "delegate_to": helper_agents,
+                                        "_help_request_processed": True,
+                                        "_help_request_context": help_request,
+                                    }
+                                )
+                                logger.info(
+                                    "Collaboration protocol: %s requested help from %s",
+                                    resolved_agent_name,
+                                    helper_agents,
+                                )
+                                result = await self._execute_with_orchestration(
+                                    requested_agent_name=resolved_agent_name,
+                                    task=help_task,
+                                )
 
                     # If successful, break the retry loop
                     break
