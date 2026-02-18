@@ -1,5 +1,7 @@
 import inspect
+import signal
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,6 +19,102 @@ import api.revenue as revenue_api  # noqa: E402
 import api.revenue_automation as revenue_automation_api  # noqa: E402
 import api.taskmate as taskmate_api  # noqa: E402
 import database.async_connection as db_async  # noqa: E402
+
+
+def pytest_addoption(parser):
+    """Provide a local fallback for --timeout when pytest-timeout isn't installed."""
+    try:
+        parser.addoption(
+            "--timeout",
+            action="store",
+            default=None,
+            help="Per-test timeout in seconds (noop fallback option).",
+        )
+    except ValueError:
+        # Option already provided by pytest-timeout plugin.
+        pass
+
+
+class _LocalTestTimeoutError(TimeoutError):
+    """Raised when local timeout fallback expires."""
+
+
+def _local_timeout_seconds(config) -> float:
+    timeout = config.getoption("timeout")
+    try:
+        return float(timeout) if timeout is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _use_local_timeout(config) -> bool:
+    return (
+        not config.pluginmanager.hasplugin("timeout")
+        and hasattr(signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+        and _local_timeout_seconds(config) > 0
+    )
+
+
+class _LocalTimeoutGuard:
+    def __init__(self, seconds: float, nodeid: str, phase: str):
+        self.seconds = seconds
+        self.nodeid = nodeid
+        self.phase = phase
+        self.previous_handler = None
+
+    def __enter__(self):
+        def _raise_timeout(_signum, _frame):
+            raise _LocalTestTimeoutError(
+                f"{self.nodeid} exceeded --timeout={self.seconds:g}s during {self.phase}"
+            )
+
+        self.previous_handler = signal.getsignal(signal.SIGALRM)
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.setitimer(signal.ITIMER_REAL, self.seconds)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, self.previous_handler)
+        return False
+
+
+def _timeout_guard(item, phase: str):
+    return _LocalTimeoutGuard(_local_timeout_seconds(item.config), item.nodeid, phase)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_setup(item):
+    """Enforce timeout during fixture setup when pytest-timeout is unavailable."""
+    if not _use_local_timeout(item.config):
+        yield
+        return
+    with _timeout_guard(item, "setup"):
+        yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item):
+    """Enforce timeout during test call when pytest-timeout is unavailable."""
+    if not _use_local_timeout(item.config):
+        yield
+        return
+    with _timeout_guard(item, "call"):
+        yield
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item):
+    """Enforce timeout during fixture teardown when pytest-timeout is unavailable."""
+    if item.config.pluginmanager.hasplugin("timeout"):
+        yield
+        return
+    if not _use_local_timeout(item.config):
+        yield
+        return
+    with _timeout_guard(item, "teardown"):
+        yield
 
 
 class MockTenantScopedPool:

@@ -372,7 +372,7 @@ async def recall_memory(query: RecallQuery):
     import asyncio
 
     try:
-        from unified_memory_manager import get_memory_manager, MemoryType
+        from unified_memory_manager import MemoryType, UnifiedMemoryManager, get_memory_manager
     except ImportError:
         raise HTTPException(status_code=503, detail="Unified Memory Manager not available")
 
@@ -395,15 +395,25 @@ async def recall_memory(query: RecallQuery):
         if not tenant_id:
             raise HTTPException(status_code=500, detail="No tenant_id configured for memory recall")
 
-        # recall() is synchronous (psycopg2) — run in thread
-        results = await asyncio.to_thread(
-            memory.recall,
-            query.query,
-            tenant_id=tenant_id,
-            context=query.context,
-            limit=query.limit,
-            memory_type=mem_type,
-        )
+        # UnifiedMemoryManager.recall() is synchronous (psycopg2) — run in thread.
+        # For lightweight test doubles, call directly to avoid creating teardown-blocking executors.
+        if isinstance(memory, UnifiedMemoryManager):
+            results = await asyncio.to_thread(
+                memory.recall,
+                query.query,
+                tenant_id=tenant_id,
+                context=query.context,
+                limit=query.limit,
+                memory_type=mem_type,
+            )
+        else:
+            results = memory.recall(
+                query.query,
+                tenant_id=tenant_id,
+                context=query.context,
+                limit=query.limit,
+                memory_type=mem_type,
+            )
 
         # Sanitize results
         sanitized = []
