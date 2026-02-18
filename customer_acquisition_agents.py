@@ -102,6 +102,32 @@ def _require_anthropic(feature: str) -> bool:
         return False
     return True
 
+
+def _safe_json_parse(raw: Any, default: Any) -> Any:
+    """Best-effort JSON parsing for model outputs."""
+    if isinstance(raw, (dict, list)):
+        return raw
+    if not isinstance(raw, str):
+        return default
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        import re
+
+        obj_match = re.search(r"\{[\s\S]*\}", raw)
+        if obj_match:
+            try:
+                return json.loads(obj_match.group())
+            except Exception:
+                pass
+        arr_match = re.search(r"\[[\s\S]*\]", raw)
+        if arr_match:
+            try:
+                return json.loads(arr_match.group())
+            except Exception:
+                pass
+    return default
+
 class AcquisitionChannel(Enum):
     """Customer acquisition channels"""
     WEB_SEARCH = "web_search"
@@ -172,6 +198,30 @@ class WebSearchAgent(CustomerAcquisitionAgent):
 
     def __init__(self):
         super().__init__("WebSearchAgent")
+
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Execute web-search lead discovery."""
+        criteria = {
+            "industry": task.get("industry", "roofing"),
+            "location": task.get("location", "United States"),
+            "company_size": task.get("company_size", "5-50 employees"),
+        }
+        leads = await self.search_for_leads(criteria)
+        return {
+            "status": "completed",
+            "channel": AcquisitionChannel.WEB_SEARCH.value,
+            "criteria": criteria,
+            "leads_found": len(leads),
+            "top_leads": [
+                {
+                    "company_name": lead.company_name,
+                    "email": lead.metadata.get("email") if isinstance(lead.metadata, dict) else None,
+                    "intent_score": lead.intent_score,
+                    "source": lead.acquisition_channel.value,
+                }
+                for lead in leads[:10]
+            ],
+        }
 
     async def search_for_leads(self, criteria: dict) -> list[AcquisitionTarget]:
         """Search web for potential customers matching criteria"""
@@ -351,6 +401,16 @@ class SocialMediaAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("SocialMediaAgent")
 
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Execute social signal monitoring and qualification."""
+        leads = await self.monitor_social_signals()
+        return {
+            "status": "completed",
+            "channel": AcquisitionChannel.SOCIAL_MEDIA.value,
+            "signals_processed": len(leads),
+            "qualified_leads": leads[:10],
+        }
+
     async def monitor_social_signals(self) -> list[dict]:
         """Monitor social media for buying signals"""
         try:
@@ -489,6 +549,85 @@ class OutreachAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("OutreachAgent")
 
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Execute outreach actions for one target or a campaign batch."""
+        action = str(task.get("action") or task.get("type") or "run_campaign").lower()
+
+        if action in {"create_sequence", "create_outreach_sequence"}:
+            target_id = task.get("target_id")
+            if not target_id:
+                return {"status": "error", "error": "target_id required for create_sequence"}
+            sequence = await self.create_outreach_sequence(str(target_id))
+            if not sequence:
+                return {"status": "error", "error": f"Failed to create outreach sequence for {target_id}"}
+            return {
+                "status": "completed",
+                "target_id": str(target_id),
+                "touches": len(sequence.get("touches", [])) if isinstance(sequence, dict) else 0,
+            }
+
+        if action in {"run_campaign", "campaign", "scheduled", "scheduled_run"}:
+            return await self.run_acquisition_campaign(
+                limit=int(task.get("limit", 10)),
+                min_intent_score=float(task.get("min_intent_score", 0.55)),
+            )
+
+        return {"status": "error", "error": f"Unknown outreach action: {action}"}
+
+    async def run_acquisition_campaign(self, limit: int = 10, min_intent_score: float = 0.55) -> dict:
+        """Create outreach sequences for top intent targets not yet contacted."""
+        try:
+            conn = _get_db_connection(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                SELECT id, company_name, intent_score, status
+                FROM acquisition_targets
+                WHERE COALESCE(status, 'new') IN ('new', 'qualified')
+                  AND COALESCE(intent_score, 0) >= %s
+                ORDER BY intent_score DESC, created_at DESC
+                LIMIT %s
+                """,
+                (min_intent_score, max(1, limit)),
+            )
+            targets = cursor.fetchall() or []
+            cursor.close()
+            conn.close()
+
+            contacted_ids: list[str] = []
+            for target in targets:
+                target_id = str(target.get("id"))
+                sequence = await self.create_outreach_sequence(target_id)
+                if sequence:
+                    contacted_ids.append(target_id)
+
+            if contacted_ids:
+                conn = _get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    UPDATE acquisition_targets
+                    SET status = 'contacted',
+                        updated_at = NOW()
+                    WHERE id::text = ANY(%s)
+                    """,
+                    (contacted_ids,),
+                )
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+            return {
+                "status": "completed",
+                "targets_processed": len(targets),
+                "outreach_started": len(contacted_ids),
+                "target_ids": contacted_ids,
+            }
+        except Exception as e:
+            logger.error(f"Acquisition campaign run failed: {e}")
+            return {"status": "error", "error": str(e)}
+
     async def create_outreach_sequence(self, target_id: str) -> dict:
         """Create multi-touch outreach sequence"""
         try:
@@ -625,11 +764,76 @@ class ConversionAgent(CustomerAcquisitionAgent):
     def __init__(self):
         super().__init__("ConversionAgent")
 
+    async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
+        """Execute conversion optimization for one target or an active funnel batch."""
+        action = str(task.get("action") or task.get("type") or "optimize_funnel").lower()
+
+        if action in {"optimize_conversion_path", "optimize_target", "optimize"}:
+            target_id = task.get("target_id")
+            if not target_id:
+                return {"status": "error", "error": "target_id required for optimize_conversion_path"}
+            return await self.optimize_conversion_path(str(target_id))
+
+        if action in {"optimize_funnel", "scheduled", "scheduled_run"}:
+            return await self.optimize_conversion_funnel(
+                limit=int(task.get("limit", 25)),
+                lookback_days=int(task.get("lookback_days", 30)),
+            )
+
+        return {"status": "error", "error": f"Unknown conversion action: {action}"}
+
+    async def optimize_conversion_funnel(self, limit: int = 25, lookback_days: int = 30) -> dict:
+        """Optimize conversion for recently active/engaged acquisition targets."""
+        try:
+            conn = _get_db_connection(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT id, company_name, intent_score, status
+                FROM acquisition_targets
+                WHERE COALESCE(status, 'new') IN ('contacted', 'qualified', 'engaged')
+                  AND created_at > NOW() - (%s || ' days')::interval
+                ORDER BY intent_score DESC NULLS LAST, updated_at DESC NULLS LAST
+                LIMIT %s
+                """,
+                (max(1, lookback_days), max(1, limit)),
+            )
+            targets = cursor.fetchall() or []
+            cursor.close()
+            conn.close()
+
+            optimized = 0
+            scheduled_actions = 0
+            failures = 0
+            for target in targets:
+                result = await self.optimize_conversion_path(str(target.get("id")))
+                if result.get("status") == "completed":
+                    optimized += 1
+                    if result.get("outreach_scheduled"):
+                        scheduled_actions += 1
+                else:
+                    failures += 1
+
+            return {
+                "status": "completed",
+                "targets_processed": len(targets),
+                "optimized_targets": optimized,
+                "outreach_scheduled": scheduled_actions,
+                "failed_targets": failures,
+            }
+        except Exception as e:
+            logger.error(f"Conversion funnel optimization failed: {e}")
+            return {"status": "error", "error": str(e)}
+
     async def optimize_conversion_path(self, target_id: str) -> dict:
         """Optimize the conversion path for a target"""
         try:
             if not _require_openai("conversion optimization"):
-                return {}
+                return {
+                    "status": "skipped",
+                    "reason": "OPENAI_API_KEY missing",
+                    "target_id": target_id,
+                }
 
             # Analyze target's engagement
             engagement = await self._analyze_engagement(target_id)
@@ -656,7 +860,9 @@ class ConversionAgent(CustomerAcquisitionAgent):
                 temperature=0.6
             )
 
-            strategy = json.loads(response.choices[0].message.content)
+            strategy = _safe_json_parse(response.choices[0].message.content, {})
+            if not isinstance(strategy, dict):
+                strategy = {"next_best_action": "follow_up", "channel": "email"}
 
             # Execute conversion strategy
             result = await self._execute_conversion_strategy(target_id, strategy)
@@ -666,7 +872,7 @@ class ConversionAgent(CustomerAcquisitionAgent):
 
         except Exception as e:
             logger.error(f"Conversion optimization failed: {e}")
-            return {}
+            return {"status": "error", "error": str(e), "target_id": target_id}
 
     async def _analyze_engagement(self, target_id: str) -> dict:
         """Analyze target's engagement history"""
@@ -696,9 +902,138 @@ class ConversionAgent(CustomerAcquisitionAgent):
             return {}
 
     async def _execute_conversion_strategy(self, target_id: str, strategy: dict) -> dict:
-        """Execute the conversion strategy"""
-        # Implement conversion strategy execution
-        return {"status": "executed", "strategy": strategy}
+        """Persist and schedule a concrete conversion action."""
+        try:
+            conn = _get_db_connection(cursor_factory=RealDictCursor)
+            cursor = conn.cursor()
+
+            channel = str(
+                strategy.get("channel")
+                or strategy.get("optimal_channel")
+                or strategy.get("delivery_channel")
+                or "email"
+            ).lower()
+            next_action = str(
+                strategy.get("next_best_action")
+                or strategy.get("message_angle")
+                or strategy.get("action")
+                or "follow_up"
+            )
+            message_angle = str(
+                strategy.get("message_angle")
+                or strategy.get("offer_to_present")
+                or strategy.get("offer")
+                or "value_reinforcement"
+            )
+            timing_text = str(strategy.get("optimal_timing") or strategy.get("timing") or "24h")
+            timing_lower = timing_text.lower()
+            if "immediate" in timing_lower or "now" in timing_lower:
+                delay_hours = 1
+            elif "week" in timing_lower:
+                delay_hours = 24 * 7
+            elif "day" in timing_lower:
+                delay_hours = 24
+            else:
+                delay_hours = 6
+
+            scheduled_for = datetime.now(timezone.utc) + timedelta(hours=delay_hours)
+
+            cursor.execute(
+                """
+                INSERT INTO acquisition_activities
+                (target_id, activity_type, activity_data, agent_id)
+                VALUES (%s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    target_id,
+                    "conversion_strategy_generated",
+                    json.dumps(
+                        {
+                            "strategy": strategy,
+                            "next_action": next_action,
+                            "message_angle": message_angle,
+                            "scheduled_for": scheduled_for.isoformat(),
+                        }
+                    ),
+                    self.agent_id,
+                ),
+            )
+            strategy_activity = cursor.fetchone()
+            strategy_activity_id = (
+                str(strategy_activity.get("id")) if isinstance(strategy_activity, dict) else None
+            )
+
+            outreach_scheduled = False
+            outreach_id = None
+            if channel in {"email", "sms", "call", "linkedin"}:
+                cursor.execute(
+                    """
+                    INSERT INTO ai_scheduled_outreach
+                    (id, target_id, channel, message_template, personalization,
+                     scheduled_for, status, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        str(uuid.uuid4()),
+                        target_id,
+                        channel,
+                        "conversion_followup",
+                        json.dumps(
+                            {
+                                "next_best_action": next_action,
+                                "message_angle": message_angle,
+                                "offer": strategy.get("offer_to_present") or strategy.get("offer"),
+                            }
+                        ),
+                        scheduled_for,
+                        "scheduled",
+                        json.dumps(
+                            {
+                                "source": "conversion_optimizer",
+                                "strategy": strategy,
+                                "delay_hours": delay_hours,
+                            }
+                        ),
+                    ),
+                )
+                outreach_row = cursor.fetchone()
+                outreach_id = str(outreach_row.get("id")) if isinstance(outreach_row, dict) else None
+                outreach_scheduled = True
+
+            conversion_probability = strategy.get("conversion_probability")
+            try:
+                probability_value = float(conversion_probability) if conversion_probability is not None else None
+            except Exception:
+                probability_value = None
+            if probability_value is not None and probability_value >= 0.7:
+                cursor.execute(
+                    """
+                    UPDATE acquisition_targets
+                    SET status = 'qualified',
+                        updated_at = NOW()
+                    WHERE id::text = %s
+                    """,
+                    (target_id,),
+                )
+
+            conn.commit()
+            cursor.close()
+            conn.close()
+
+            return {
+                "status": "completed",
+                "target_id": target_id,
+                "strategy_activity_id": strategy_activity_id,
+                "outreach_scheduled": outreach_scheduled,
+                "scheduled_outreach_id": outreach_id,
+                "scheduled_for": scheduled_for.isoformat(),
+                "strategy": strategy,
+            }
+        except Exception as e:
+            logger.error(f"Failed to execute conversion strategy: {e}")
+            return {"status": "error", "error": str(e), "target_id": target_id}
 
 class AcquisitionOrchestrator:
     """Orchestrates all customer acquisition agents"""
