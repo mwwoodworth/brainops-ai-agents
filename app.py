@@ -1854,7 +1854,7 @@ async def lifespan(app: FastAPI):
     # Stop scheduler
     if hasattr(app.state, "scheduler") and app.state.scheduler:
         try:
-            app.state.scheduler.stop()
+            app.state.scheduler.shutdown()
             logger.info("✅ Agent Scheduler stopped")
         except Exception as e:
             logger.error(f"❌ Scheduler shutdown error: {e}")

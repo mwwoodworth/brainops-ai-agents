@@ -37,13 +37,19 @@ class MarketAnalyzerAgent(BaseAgent):
         action = task.get('action')
 
         if action == 'get_current_pricing':
-            return await self.get_current_pricing(task)
+            result = await self.get_current_pricing(task)
         elif action == 'analyze_competitor':
-            return await self.analyze_competitor(task)
+            result = await self.analyze_competitor(task)
         elif action == 'get_market_trends':
-            return await self.get_market_trends(task)
+            result = await self.get_market_trends(task)
         else:
-            return {"status": "error", "error": f"Unknown action: {action}"}
+            result = {"status": "error", "error": f"Unknown action: {action}"}
+
+        try:
+            await self.log_execution(task, result)
+        except Exception as exc:
+            logger.debug("MarketAnalyzer execution log failed: %s", exc)
+        return result
 
     async def get_current_pricing(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """

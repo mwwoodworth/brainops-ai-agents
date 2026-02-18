@@ -155,15 +155,16 @@ except ImportError:
     run_outreach_cycle = None
     logging.warning("Outreach Executor unavailable")
 
-# Lead Discovery (scans ERP customers for re-engagement, upsell, referral leads)
+# Revenue pipeline agents (lead discovery + nurture executor)
 try:
-    from revenue_pipeline_agents import LeadDiscoveryAgentReal
+    from revenue_pipeline_agents import LeadDiscoveryAgentReal, NurtureExecutorAgentReal
 
-    LEAD_DISCOVERY_AVAILABLE = True
+    REVENUE_PIPELINE_AGENTS_AVAILABLE = True
 except ImportError:
-    LEAD_DISCOVERY_AVAILABLE = False
+    REVENUE_PIPELINE_AGENTS_AVAILABLE = False
     LeadDiscoveryAgentReal = None
-    logging.warning("Lead Discovery Agent unavailable")
+    NurtureExecutorAgentReal = None
+    logging.warning("Revenue pipeline agents unavailable")
 
 # Daily WC Intelligence Report
 try:
@@ -784,6 +785,27 @@ class AgentScheduler:
 
         logger.info(f"⚙️ Executing {agent_type} agent: {agent_name}")
 
+        # Revenue-critical real agents: execute explicit handlers first to avoid
+        # generic type-based routing sending them down stub/legacy paths.
+        critical_handlers = {
+            "LeadDiscoveryAgentReal": self._run_lead_discovery,
+            "LeadDiscoveryAgent": self._run_lead_discovery,
+            "LeadGenerationAgent": self._run_lead_discovery,
+            "NurtureExecutorAgentReal": self._run_nurture_executor,
+            "NurtureExecutorAgent": self._run_nurture_executor,
+            "CustomerAcquisition": self._run_customer_acquisition,
+            "ConversionOptimizer": self._run_conversion_optimizer,
+            "ProposalGenerator": self._run_proposal_generator,
+            "RevenueOptimizer": self._run_revenue_optimizer,
+            "SEOOptimizer": self._run_seo_optimizer,
+            "ContentGenerator": self._run_content_generator,
+            "EmailMarketing": self._run_email_marketing,
+            "EmailMarketingAgent": self._run_email_marketing,
+            "MarketAnalyzer": self._run_market_analyzer,
+        }
+        if agent_name in critical_handlers:
+            return critical_handlers[agent_name]()
+
         # Health monitoring agent
         if agent_name == "HealthMonitor":
             return self._execute_health_monitor(agent, cur, conn)
@@ -830,7 +852,14 @@ class AgentScheduler:
             return self._execute_content_agent(agent, cur, conn)
 
         # Customer Acquisition
-        elif agent_name in ["WebSearch", "SocialMedia", "Outreach", "Conversion"]:
+        elif agent_name in [
+            "WebSearch",
+            "SocialMedia",
+            "Outreach",
+            "Conversion",
+            "CustomerAcquisition",
+            "ConversionOptimizer",
+        ]:
             return self._execute_acquisition_agent(agent, cur, conn)
 
         # Default: log and continue
@@ -1784,29 +1813,73 @@ class AgentScheduler:
             if not ACQUISITION_AGENTS_AVAILABLE:
                 return {"status": "skipped", "error": "Acquisition agents unavailable"}
 
-            if "WebSearch" in agent["name"]:
+            agent_name = str(agent.get("name") or "")
+            if "WebSearch" in agent_name:
                 instance = WebSearchAgent()
                 result = run_on_main_loop(
-                    instance.search_for_leads({"industry": "roofing"}), timeout=300
+                    instance.execute(
+                        {
+                            "action": "search_for_leads",
+                            "industry": "roofing",
+                            "location": "United States",
+                            "company_size": "5-50 employees",
+                        }
+                    ),
+                    timeout=300,
                 )
-            elif "SocialMedia" in agent["name"]:
+            elif "SocialMedia" in agent_name:
                 instance = SocialMediaAgent()
-                result = run_on_main_loop(instance.monitor_social_signals(), timeout=300)
-            elif "Outreach" in agent["name"]:
-                # Outreach usually needs a target_id, placeholder for now
-                result = {"status": "outreach_scan_completed"}
-            elif "Conversion" in agent["name"]:
-                result = {"status": "conversion_optimization_completed"}
+                result = run_on_main_loop(
+                    instance.execute({"action": "monitor_signals"}),
+                    timeout=300,
+                )
+            elif "Outreach" in agent_name or agent_name == "CustomerAcquisition":
+                instance = OutreachAgent()
+                result = run_on_main_loop(
+                    instance.execute(
+                        {
+                            "action": "run_campaign",
+                            "industry": "roofing",
+                            "location": "United States",
+                            "limit": 10,
+                            "min_intent_score": 0.55,
+                        }
+                    ),
+                    timeout=300,
+                )
+            elif "Conversion" in agent_name or agent_name == "ConversionOptimizer":
+                instance = ConversionAgent()
+                result = run_on_main_loop(
+                    instance.execute(
+                        {
+                            "action": "optimize_funnel",
+                            "lookback_days": 30,
+                            "limit": 25,
+                        }
+                    ),
+                    timeout=300,
+                )
             else:
                 result = {"status": "unknown_acquisition_agent"}
 
-            # Count results
-            count = len(result) if isinstance(result, list) else 0
+            if isinstance(result, dict):
+                count = (
+                    int(result.get("targets_processed") or 0)
+                    or int(result.get("optimized_targets") or 0)
+                    or int(result.get("leads_found") or 0)
+                    or int(result.get("signals_processed") or 0)
+                    or int(result.get("outreach_started") or 0)
+                )
+            elif isinstance(result, list):
+                count = len(result)
+            else:
+                count = 0
 
             return {
                 "status": "completed",
-                "agent": agent["name"],
+                "agent": agent_name,
                 "items_found": count,
+                "result": result,
                 "timestamp": datetime.utcnow().isoformat(),
             }
 
@@ -2058,19 +2131,265 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Daily Briefing failed: %s", exc, exc_info=True)
 
-    def _run_lead_discovery(self):
-        """Scan ERP customers for re-engagement, upsell, and referral leads."""
-        if not LEAD_DISCOVERY_AVAILABLE:
-            logger.debug("Lead Discovery skipped: not available")
+    def _store_internal_job_memory(
+        self,
+        agent_name: str,
+        result: dict[str, Any],
+    ) -> None:
+        """Persist internal job results to UnifiedBrain when available."""
+        if not self.brain:
             return
         try:
-            agent = LeadDiscoveryAgentReal()
-            result = run_on_main_loop(agent.discover_all_leads(), timeout=120)
-            discovered = result.get("leads_discovered", 0)
-            stored = result.get("leads_stored", 0)
-            logger.info("Lead Discovery: discovered=%s, stored=%s", discovered, stored)
+            memory_category = self._classify_memory_category(agent_name, result)
+            self.brain.store(
+                key=f"scheduler_internal_{agent_name}_{datetime.utcnow().isoformat()}",
+                value={
+                    "agent_name": agent_name,
+                    "status": result.get("status"),
+                    "result": result,
+                    "memory_category": memory_category,
+                    "timestamp": datetime.utcnow().isoformat(),
+                },
+                category=memory_category,
+                priority="high" if memory_category == "alert" else "medium",
+                source="agent_scheduler_internal",
+                metadata={"memory_category": memory_category},
+            )
+        except Exception as mem_exc:
+            logger.warning("Failed to store internal scheduler memory for %s: %s", agent_name, mem_exc)
+
+    def _run_executor_agent(
+        self,
+        agent_name: str,
+        task: Optional[dict[str, Any]] = None,
+        timeout: int = 300,
+    ) -> dict[str, Any]:
+        """Execute an agent through shared AgentExecutor on the FastAPI main loop."""
+        payload = {"scheduled": True, "source": "agent_scheduler"}
+        if task:
+            payload.update(task)
+        try:
+            from agent_executor import executor as shared_executor
+
+            result = run_on_main_loop(shared_executor.execute(agent_name, payload), timeout=timeout)
+            if not isinstance(result, dict):
+                result = {"status": "completed", "result": result}
+            self._store_internal_job_memory(agent_name, result)
+            return result
         except Exception as exc:
-            logger.error("Lead Discovery failed: %s", exc, exc_info=True)
+            logger.error("%s execution via AgentExecutor failed: %s", agent_name, exc, exc_info=True)
+            result = {"status": "error", "error": str(exc)}
+            self._store_internal_job_memory(agent_name, result)
+            return result
+
+    def _run_lead_discovery(self) -> dict:
+        """Run real lead discovery pipeline against production data."""
+        if not REVENUE_PIPELINE_AGENTS_AVAILABLE:
+            logger.debug("Lead Discovery skipped: revenue pipeline agents unavailable")
+            return {"status": "skipped", "reason": "revenue_pipeline_agents_unavailable"}
+        result = self._run_executor_agent(
+            "LeadDiscoveryAgentReal",
+            {"action": "discover_all"},
+            timeout=180,
+        )
+        logger.info(
+            "Lead Discovery: status=%s discovered=%s stored=%s",
+            result.get("status"),
+            result.get("leads_discovered"),
+            result.get("leads_stored"),
+        )
+        return result
+
+    def _run_nurture_executor(self) -> dict:
+        """Run nurture sequence execution and immediately process queued email sends."""
+        if not REVENUE_PIPELINE_AGENTS_AVAILABLE:
+            logger.debug("Nurture Executor skipped: revenue pipeline agents unavailable")
+            return {"status": "skipped", "reason": "revenue_pipeline_agents_unavailable"}
+
+        if not os.getenv("RESEND_API_KEY"):
+            logger.warning(
+                "RESEND_API_KEY not configured; nurture email delivery will rely on secondary providers."
+            )
+
+        nurture = self._run_executor_agent(
+            "NurtureExecutorAgentReal",
+            {"action": "nurture_new_leads"},
+            timeout=300,
+        )
+
+        delivery: dict[str, Any]
+        try:
+            from email_sender import process_email_queue
+
+            delivery = process_email_queue(batch_size=50)
+        except Exception as exc:
+            logger.error("Nurture delivery processing failed: %s", exc, exc_info=True)
+            delivery = {"status": "error", "error": str(exc)}
+
+        final_status = (
+            "failed"
+            if nurture.get("status") in {"error", "failed"}
+            or delivery.get("status") in {"error", "failed"}
+            else "completed"
+        )
+        result = {"status": final_status, "nurture": nurture, "delivery": delivery}
+        self._store_internal_job_memory("NurtureExecutorAgentReal", result)
+        logger.info(
+            "Nurture Executor: leads_processed=%s sequences=%s sent=%s failed=%s",
+            nurture.get("leads_processed"),
+            nurture.get("sequences_created"),
+            delivery.get("sent", 0),
+            delivery.get("failed", 0),
+        )
+        return result
+
+    def _run_customer_acquisition(self) -> dict:
+        """Run outbound acquisition campaign orchestration."""
+        result = self._run_executor_agent(
+            "CustomerAcquisition",
+            {
+                "action": "run_campaign",
+                "industry": "roofing",
+                "location": "United States",
+                "limit": 10,
+                "min_intent_score": 0.55,
+            },
+            timeout=300,
+        )
+        logger.info("Customer Acquisition: status=%s", result.get("status"))
+        return result
+
+    def _run_conversion_optimizer(self) -> dict:
+        """Run conversion funnel optimization on active targets."""
+        result = self._run_executor_agent(
+            "ConversionOptimizer",
+            {"action": "optimize_funnel", "lookback_days": 30, "limit": 25},
+            timeout=300,
+        )
+        logger.info("Conversion Optimizer: status=%s", result.get("status"))
+        return result
+
+    def _run_proposal_generator(self) -> dict:
+        """Generate proposals for pending estimates when real opportunities exist."""
+        candidate = None
+        try:
+            with self.get_db_connection() as conn:
+                cur = conn.cursor(cursor_factory=RealDictCursor)
+                try:
+                    cur.execute(
+                        """
+                        SELECT
+                            e.id,
+                            e.customer_id,
+                            e.total_amount,
+                            e.created_at,
+                            c.name as customer_name,
+                            c.email as customer_email,
+                            c.address as customer_address
+                        FROM estimates e
+                        LEFT JOIN customers c ON c.id = e.customer_id
+                        WHERE e.status = 'pending'
+                        ORDER BY e.created_at ASC
+                        LIMIT 1
+                        """
+                    )
+                    candidate = cur.fetchone()
+                finally:
+                    cur.close()
+        except Exception as exc:
+            logger.warning("Proposal scheduler could not query pending estimates: %s", exc)
+
+        if not candidate:
+            result = {"status": "completed", "processed": 0, "reason": "no_pending_estimates"}
+            self._store_internal_job_memory("ProposalGenerator", result)
+            return result
+
+        task = {
+            "type": "roofing",
+            "customer": {
+                "id": str(candidate.get("customer_id")) if candidate.get("customer_id") else None,
+                "name": candidate.get("customer_name") or "Valued Customer",
+                "email": candidate.get("customer_email"),
+                "address": candidate.get("customer_address"),
+            },
+            "job_data": {
+                "project_name": f"Estimate {candidate.get('id')}",
+                "description": "Pending estimate follow-up proposal",
+                "amount": float(candidate.get("total_amount") or 0),
+            },
+        }
+        result = self._run_executor_agent("ProposalGenerator", task, timeout=240)
+        logger.info("Proposal Generator: status=%s", result.get("status"))
+        return result
+
+    def _run_revenue_optimizer(self) -> dict:
+        """Run revenue optimization analytics against live ERP data."""
+        result = self._run_executor_agent(
+            "RevenueOptimizer",
+            {"action": "full_analysis"},
+            timeout=300,
+        )
+        logger.info("Revenue Optimizer: status=%s", result.get("status"))
+        return result
+
+    def _run_seo_optimizer(self) -> dict:
+        """Generate SEO optimization recommendations."""
+        result = self._run_executor_agent(
+            "SEOOptimizer",
+            {"action": "recommendations"},
+            timeout=240,
+        )
+        if result.get("status") in {"error", "failed"}:
+            # Fallback to audit mode when AI recommendation generation is unavailable.
+            result = self._run_executor_agent(
+                "SEOOptimizer",
+                {"action": "audit"},
+                timeout=180,
+            )
+        logger.info("SEO Optimizer: status=%s", result.get("status"))
+        return result
+
+    def _run_content_generator(self) -> dict:
+        """Generate real marketing content using the multi-AI content pipeline."""
+        if not os.getenv("OPENAI_API_KEY"):
+            logger.warning("OPENAI_API_KEY not configured; content generation may be limited.")
+        result = self._run_executor_agent(
+            "ContentGenerator",
+            {
+                "action": "generate_blog",
+                "industry": "roofing",
+                "tone": "professional",
+                "include_image": False,
+                "status": "draft",
+            },
+            timeout=600,
+        )
+        logger.info("Content Generator: status=%s", result.get("status"))
+        return result
+
+    def _run_email_marketing(self) -> dict:
+        """Run email marketing queue/sequence management."""
+        result = self._run_executor_agent(
+            "EmailMarketingAgent",
+            {"action": "pending_emails"},
+            timeout=240,
+        )
+        logger.info("Email Marketing: status=%s", result.get("status"))
+        return result
+
+    def _run_market_analyzer(self) -> dict:
+        """Run market analysis for pricing and trend intelligence."""
+        result = self._run_executor_agent(
+            "MarketAnalyzer",
+            {
+                "action": "get_market_trends",
+                "location": "United States",
+                "sector": "Roofing",
+            },
+            timeout=240,
+        )
+        logger.info("Market Analyzer: status=%s", result.get("status"))
+        return result
 
     def _run_outreach_executor(self):
         """Execute outreach cycle: process ai_scheduled_outreach + run campaigns for new leads.
@@ -2132,6 +2451,43 @@ class AgentScheduler:
             )
         except Exception as exc:
             logger.error("Stuck execution cleanup failed: %s", exc, exc_info=True)
+
+    def _register_internal_agent_job(
+        self,
+        *,
+        job_id: str,
+        agent_name: str,
+        frequency_minutes: int,
+        func,
+    ) -> None:
+        """Register a deterministic internal job for a revenue-critical agent."""
+        try:
+            self.scheduler.add_job(
+                func=func,
+                trigger=IntervalTrigger(minutes=frequency_minutes),
+                id=job_id,
+                name=f"Revenue Critical: {agent_name}",
+                replace_existing=True,
+            )
+            self.registered_jobs[job_id] = {
+                "agent_id": job_id,
+                "agent_name": agent_name,
+                "frequency_minutes": frequency_minutes,
+                "critical": True,
+                "added_at": datetime.utcnow().isoformat(),
+            }
+            logger.info(
+                "✅ Scheduled revenue-critical agent %s every %d minutes",
+                agent_name,
+                frequency_minutes,
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to schedule revenue-critical agent %s: %s",
+                agent_name,
+                exc,
+                exc_info=True,
+            )
 
     def _register_internal_jobs(self):
         """Register internal recurring jobs (e.g., revenue drive)."""
@@ -2446,26 +2802,75 @@ class AgentScheduler:
         except Exception as exc:
             logger.error("Failed to schedule Daily Ops Briefing: %s", exc, exc_info=True)
 
-        # Lead Discovery: scan ERP customers for new revenue leads every 12 hours
-        if LEAD_DISCOVERY_AVAILABLE:
-            try:
-                job_id = "lead_discovery"
-                self.scheduler.add_job(
-                    func=self._run_lead_discovery,
-                    trigger=IntervalTrigger(hours=12),
-                    id=job_id,
-                    name="Lead Discovery",
-                    replace_existing=True,
-                )
-                self.registered_jobs[job_id] = {
-                    "agent_id": "lead_discovery",
-                    "agent_name": "LeadDiscoveryAgentReal",
-                    "frequency_minutes": 720,
-                    "added_at": datetime.utcnow().isoformat(),
-                }
-                logger.info("Scheduled Lead Discovery every 12 hours")
-            except Exception as exc:
-                logger.error("Failed to schedule Lead Discovery: %s", exc, exc_info=True)
+        # Revenue-critical agent schedules (deterministic runtime jobs).
+        # Required cadence:
+        # - LeadDiscoveryAgentReal: every 4h
+        # - NurtureExecutorAgentReal: every 1h
+        # - SEOOptimizer: every 24h
+        # - ContentGenerator: every 12h
+        # - MarketAnalyzer: every 6h
+        self._register_internal_agent_job(
+            job_id="lead_discovery",
+            agent_name="LeadDiscoveryAgentReal",
+            frequency_minutes=240,
+            func=self._run_lead_discovery,
+        )
+        self._register_internal_agent_job(
+            job_id="nurture_executor_real",
+            agent_name="NurtureExecutorAgentReal",
+            frequency_minutes=60,
+            func=self._run_nurture_executor,
+        )
+        self._register_internal_agent_job(
+            job_id="seo_optimizer_real",
+            agent_name="SEOOptimizer",
+            frequency_minutes=1440,
+            func=self._run_seo_optimizer,
+        )
+        self._register_internal_agent_job(
+            job_id="content_generator_real",
+            agent_name="ContentGenerator",
+            frequency_minutes=720,
+            func=self._run_content_generator,
+        )
+        self._register_internal_agent_job(
+            job_id="market_analyzer_real",
+            agent_name="MarketAnalyzer",
+            frequency_minutes=360,
+            func=self._run_market_analyzer,
+        )
+
+        # Additional revenue-critical agents to ensure autonomous execution coverage.
+        self._register_internal_agent_job(
+            job_id="customer_acquisition_real",
+            agent_name="CustomerAcquisition",
+            frequency_minutes=360,
+            func=self._run_customer_acquisition,
+        )
+        self._register_internal_agent_job(
+            job_id="conversion_optimizer_real",
+            agent_name="ConversionOptimizer",
+            frequency_minutes=360,
+            func=self._run_conversion_optimizer,
+        )
+        self._register_internal_agent_job(
+            job_id="proposal_generator_real",
+            agent_name="ProposalGenerator",
+            frequency_minutes=720,
+            func=self._run_proposal_generator,
+        )
+        self._register_internal_agent_job(
+            job_id="revenue_optimizer_real",
+            agent_name="RevenueOptimizer",
+            frequency_minutes=240,
+            func=self._run_revenue_optimizer,
+        )
+        self._register_internal_agent_job(
+            job_id="email_marketing_real",
+            agent_name="EmailMarketingAgent",
+            frequency_minutes=120,
+            func=self._run_email_marketing,
+        )
 
         # Keep execution logs clean: auto-timeout stuck rows regularly so `brainops verify` stays green.
         cleanup_enabled_env = os.getenv("ENABLE_STUCK_EXECUTION_CLEANUP")
