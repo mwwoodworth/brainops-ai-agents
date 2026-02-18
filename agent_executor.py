@@ -750,7 +750,68 @@ class AgentExecutor:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _store_execution_in_unified_brain(
+    @staticmethod
+    def _coerce_json_dict(value: Any) -> dict[str, Any]:
+        """Normalize dict-or-JSON-string payloads from asyncpg json/jsonb fields."""
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                return {}
+        return {}
+
+    async def _count_recent_failures_from_brain(
+        self,
+        *,
+        agent_name: str,
+        since_hours: int = 24,
+        limit: int = 40,
+    ) -> int:
+        """Use brain.recall() to estimate recent execution failures for an agent."""
+        try:
+            if self._unified_brain is None:
+                self._unified_brain = UnifiedBrain(lazy_init=True)
+
+            memories = await self._unified_brain.recall(
+                query=f"agent execution {agent_name}",
+                limit=limit,
+                source="agent_executor",
+                since_hours=since_hours,
+                use_semantic=False,
+            )
+
+            failures = 0
+            for item in memories:
+                metadata = self._coerce_json_dict(item.get("metadata"))
+                value = self._coerce_json_dict(item.get("value"))
+                memory_agent = str(
+                    metadata.get("agent_name")
+                    or value.get("agent")
+                    or value.get("agent_name")
+                    or ""
+                ).strip()
+                if memory_agent and memory_agent.lower() != agent_name.lower():
+                    continue
+
+                result = self._coerce_json_dict(value.get("result"))
+                status = str(
+                    metadata.get("status")
+                    or result.get("status")
+                    or value.get("status")
+                    or ""
+                ).lower()
+                if status in {"failed", "error", "blocked", "timeout", "cancelled"}:
+                    failures += 1
+
+            return failures
+        except Exception as exc:
+            logger.warning("Brain recall failure check failed for %s: %s", agent_name, exc)
+            return 0
+
+    async def _store_execution_in_unified_brain(
         self,
         *,
         execution_id: str,
@@ -770,17 +831,29 @@ class AgentExecutor:
                 result=result,
                 duration_ms=duration_ms,
             )
-            self._unified_brain.store(
+            result_status = str((result or {}).get("status") or "completed")
+            result_summary = {
+                "status": result_status,
+                "error": str((result or {}).get("error") or "")[:400] or None,
+                "summary": str(
+                    (result or {}).get("summary")
+                    or (result or {}).get("message")
+                    or (result or {}).get("result")
+                    or ""
+                )[:600],
+            }
+            await self._unified_brain.store(
                 key=f"agent_exec_{execution_id}",
                 value={
                     "agent": agent_name,
                     "task": task,
                     "result": result,
+                    "result_summary": result_summary,
                     "duration_ms": round(float(duration_ms), 2),
                     "memory_category": metadata["memory_category"],
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 },
-                category=metadata["memory_category"],
+                category="operational",
                 priority="high" if metadata["memory_category"] == "alert" else "medium",
                 source="agent_executor",
                 metadata=metadata,
@@ -2454,6 +2527,27 @@ class AgentExecutor:
         else:
             task = dict(task) if not isinstance(task, dict) else task
 
+        failure_window_hours = int(os.getenv("AGENT_FAILURE_GUARD_WINDOW_HOURS", "24"))
+        recent_failures = await self._count_recent_failures_from_brain(
+            agent_name=agent_name,
+            since_hours=failure_window_hours,
+            limit=40,
+        )
+        if recent_failures >= 3:
+            logger.warning(
+                "Skipping execution for %s due to %s recent failures in brain recall (window=%sh)",
+                agent_name,
+                recent_failures,
+                failure_window_hours,
+            )
+            return {
+                "status": "skipped",
+                "agent": agent_name,
+                "reason": "recent_failure_guard",
+                "recent_failures": recent_failures,
+                "window_hours": failure_window_hours,
+            }
+
         # Generate execution identifiers for detailed logging
         task_id = str(task.get("task_id") or task.get("id") or uuid.uuid4())
         agent_id = str(task.get("agent_id") or agent_name)
@@ -3121,7 +3215,7 @@ class AgentExecutor:
                     logger.warning(f"Brain memory storage failed: {e}")
 
             # UnifiedBrain write-through (brain.store) for deterministic operational memory.
-            self._store_execution_in_unified_brain(
+            await self._store_execution_in_unified_brain(
                 execution_id=execution_id,
                 agent_name=agent_name,
                 task=task,
