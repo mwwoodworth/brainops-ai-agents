@@ -306,8 +306,11 @@ class AsyncDatabasePool(BasePool):
                 last_error = e
                 if attempt < max_retries:
                     logger.warning(
-                        "Connection error on %s (attempt %d/%d): %s - retrying...",
-                        operation, attempt + 1, max_retries + 1, e
+                        "Transient DB connection error on %s (attempt %d/%d, error=%s) - retrying...",
+                        operation,
+                        attempt + 1,
+                        max_retries + 1,
+                        type(e).__name__,
                     )
                     await asyncio.sleep(0.1 * (attempt + 1))  # Brief backoff
                 else:
