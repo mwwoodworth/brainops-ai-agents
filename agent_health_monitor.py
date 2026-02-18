@@ -8,19 +8,48 @@ import logging
 import os
 from datetime import datetime
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 logger = logging.getLogger(__name__)
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST'),
-    'database': os.getenv('DB_NAME', 'postgres'),
-    'user': os.getenv('DB_USER'),
-    'password': os.getenv('DB_PASSWORD'),
-    'port': int(os.getenv('DB_PORT', 5432))
-}
+def _build_db_config() -> dict[str, Any]:
+    host = os.getenv("DB_HOST")
+    database = os.getenv("DB_NAME", "postgres")
+    user = os.getenv("DB_USER")
+    password = os.getenv("DB_PASSWORD")
+    port = int(os.getenv("DB_PORT", "5432"))
+
+    if not all([host, user, password]):
+        database_url = os.getenv("DATABASE_URL", "")
+        if database_url:
+            parsed = urlparse(database_url)
+            host = parsed.hostname or host
+            database = unquote(parsed.path.lstrip("/")) if parsed.path else database
+            user = unquote(parsed.username) if parsed.username else user
+            password = unquote(parsed.password) if parsed.password else password
+            port = parsed.port or port
+
+    if host and "pooler.supabase.com" in host and port == 5432:
+        port = 6543
+
+    use_ssl = (os.getenv("DB_SSL", "true") or "").strip().lower() not in ("false", "0", "no")
+    sslmode = "require" if use_ssl else "prefer"
+
+    return {
+        "host": host,
+        "database": database,
+        "user": user,
+        "password": password,
+        "port": int(port),
+        "sslmode": sslmode,
+        "connect_timeout": 10,
+    }
+
+
+DB_CONFIG = _build_db_config()
 
 
 class AgentHealthMonitor:
