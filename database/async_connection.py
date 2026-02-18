@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import ssl
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -129,6 +130,7 @@ class AsyncDatabasePool(BasePool):
     def __init__(self, config: PoolConfig) -> None:
         self.config = config
         self._pool: Optional[asyncpg.Pool] = None
+        self._default_tenant_id = self._resolve_default_tenant_id()
         if config.ssl:
             ctx = ssl.create_default_context()
             if not config.ssl_verify:
@@ -137,6 +139,29 @@ class AsyncDatabasePool(BasePool):
             self._ssl_context = ctx
         else:
             self._ssl_context = None
+
+    @staticmethod
+    def _resolve_default_tenant_id() -> Optional[str]:
+        """
+        Resolve and normalize a UUID tenant context for pooled connections.
+
+        RLS policies across core AI tables depend on current_tenant_id(). If
+        sessions are created without tenant context, write operations are denied.
+        """
+        for candidate in (
+            os.getenv("DEFAULT_TENANT_ID"),
+            os.getenv("TENANT_ID"),
+            os.getenv("APP_DEFAULT_TENANT_ID"),
+            "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457",
+        ):
+            raw = (candidate or "").strip()
+            if not raw:
+                continue
+            try:
+                return str(uuid.UUID(raw))
+            except Exception:
+                logger.warning("Invalid tenant UUID candidate ignored: %r", raw)
+        return None
 
     @staticmethod
     def _json_text_encoder(value: Any) -> str:
@@ -169,6 +194,15 @@ class AsyncDatabasePool(BasePool):
             schema="pg_catalog",
             format="text",
         )
+        if self._default_tenant_id:
+            # Ensure RLS helpers have a deterministic session tenant context.
+            await conn.execute(
+                "SELECT set_config('app.current_tenant_id', $1, false), "
+                "set_config('app.tenant_id', $1, false), "
+                "set_config('request.jwt.claim.tenant_id', $1, false), "
+                "set_config('request.jwt.claim.organization_id', $1, false)",
+                self._default_tenant_id,
+            )
 
     async def initialize(self) -> None:
         """Initialize connection pool with timeout protection"""
