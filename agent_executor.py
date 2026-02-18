@@ -506,6 +506,7 @@ class AgentExecutor:
         self._agent_performance_cache: dict[str, dict[str, Any]] = {}
         self._agent_performance_cache_updated_at: Optional[datetime] = None
         self._agent_health_state: dict[str, dict[str, Any]] = {}
+        self._unified_brain: Optional[UnifiedBrain] = None
         self._default_tenant_id = (
             os.getenv("DEFAULT_TENANT_ID")
             or os.getenv("TENANT_ID")
@@ -748,6 +749,44 @@ class AgentExecutor:
             "source": "agent_executor",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _store_execution_in_unified_brain(
+        self,
+        *,
+        execution_id: str,
+        agent_name: str,
+        task: dict[str, Any],
+        result: dict[str, Any],
+        duration_ms: float,
+    ) -> None:
+        """Persist execution telemetry to UnifiedBrain via brain.store()."""
+        try:
+            if self._unified_brain is None:
+                self._unified_brain = UnifiedBrain(lazy_init=True)
+            metadata = self._build_operational_memory_metadata(
+                execution_id=execution_id,
+                agent_name=agent_name,
+                task=task,
+                result=result,
+                duration_ms=duration_ms,
+            )
+            self._unified_brain.store(
+                key=f"agent_exec_{execution_id}",
+                value={
+                    "agent": agent_name,
+                    "task": task,
+                    "result": result,
+                    "duration_ms": round(float(duration_ms), 2),
+                    "memory_category": metadata["memory_category"],
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+                category=metadata["memory_category"],
+                priority="high" if metadata["memory_category"] == "alert" else "medium",
+                source="agent_executor",
+                metadata=metadata,
+            )
+        except Exception as exc:
+            logger.debug("UnifiedBrain storage skipped: %s", exc)
 
     async def _load_agent_performance_snapshot(self, tenant_id: str) -> dict[str, dict[str, Any]]:
         """Load per-agent benchmark metrics from recent execution history."""
@@ -3080,6 +3119,15 @@ class AgentExecutor:
                     logger.debug(f"Stored execution in brain memory: {agent_name}")
                 except Exception as e:
                     logger.warning(f"Brain memory storage failed: {e}")
+
+            # UnifiedBrain write-through (brain.store) for deterministic operational memory.
+            self._store_execution_in_unified_brain(
+                execution_id=execution_id,
+                agent_name=agent_name,
+                task=task,
+                result=result if isinstance(result, dict) else {"result": result},
+                duration_ms=total_duration_ms,
+            )
 
             if not skip_db_log:
                 result_status = result.get("status") if isinstance(result, dict) else None
