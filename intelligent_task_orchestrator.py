@@ -1105,6 +1105,7 @@ class IntelligentTaskOrchestrator:
     ) -> str:
         """Submit a new task to the orchestrator"""
         try:
+            tenant_id = _resolve_valid_tenant_id()
             with get_db_connection() as conn:
                 if not conn:
                     raise RuntimeError("Failed to get database connection")
@@ -1112,11 +1113,19 @@ class IntelligentTaskOrchestrator:
 
                 cur.execute(
                     """
-                INSERT INTO ai_autonomous_tasks (title, task_type, payload, priority, status, created_at)
-                VALUES (%s, %s, %s, %s, 'pending', NOW())
+                INSERT INTO ai_autonomous_tasks (
+                    title, task_type, payload, priority, status, created_at, tenant_id
+                )
+                VALUES (%s, %s, %s, %s, 'pending', NOW(), %s)
                 RETURNING id
                 """,
-                    (title, task_type, Json({"type": task_type, **payload}), priority),
+                    (
+                        title,
+                        task_type,
+                        Json({"type": task_type, **payload}),
+                        priority,
+                        tenant_id,
+                    ),
                 )
 
                 task_id = str(cur.fetchone()[0])
