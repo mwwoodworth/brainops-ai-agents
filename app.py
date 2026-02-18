@@ -956,6 +956,18 @@ except ImportError as e:
     NerveCenter = None
     logger.warning(f"NerveCenter not available: {e}")
 
+# Import OperationalMonitor - real operational awareness loop
+try:
+    from operational_monitor import OperationalMonitor, get_operational_monitor
+
+    OPERATIONAL_MONITOR_AVAILABLE = True
+    logger.info("✅ OperationalMonitor module loaded")
+except ImportError as e:
+    OPERATIONAL_MONITOR_AVAILABLE = False
+    get_operational_monitor = None
+    OperationalMonitor = None
+    logger.warning(f"OperationalMonitor not available: {e}")
+
 # Import AI Integration Layer with fallback
 try:
     from ai_integration_layer import (
@@ -1267,6 +1279,8 @@ async def lifespan(app: FastAPI):
     app.state.embedded_memory = None
     app.state.nerve_center = None
     app.state.nerve_center_error = None
+    app.state.operational_monitor = None
+    app.state.operational_monitor_error = None
     app.state.neural_core = None  # Central Nervous System (2026-01-27)
 
     # DEFERRED HEAVY INITIALIZATION - runs AFTER server binds to port
@@ -1422,32 +1436,38 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ Always-Know Brain startup failed: {e}")
 
-        # Initialize NerveCenter - THE Central Nervous System of BrainOps AI OS
-        if NERVE_CENTER_AVAILABLE and config.enable_nerve_center:
+        # Initialize NerveCenter (always enabled; lightweight operational scans only)
+        if NERVE_CENTER_AVAILABLE and get_nerve_center:
             try:
-                logger.info("🧬 Initializing NerveCenter - Central Nervous System...")
+                logger.info("🧬 Initializing NerveCenter operational coordinator...")
                 nerve_center = get_nerve_center()
-
-                # Activate the nerve center (starts AliveCore and autonomic MAPE-K loop)
                 await nerve_center.activate()
-
                 app.state.nerve_center = nerve_center
-                logger.info("🧬 NerveCenter ACTIVATED - AI OS Central Nervous System ONLINE")
-                logger.info(
-                    "   └── Autonomic decisions, nerve signals, and consciousness coordination active"
-                )
+                logger.info("🧬 NerveCenter activated")
             except Exception as e:
                 logger.error(f"❌ NerveCenter activation failed: {e}")
                 app.state.nerve_center_error = str(e)
                 import traceback
 
                 logger.error(traceback.format_exc())
-        elif NERVE_CENTER_AVAILABLE and not config.enable_nerve_center:
-            logger.info(
-                "⚠️ NerveCenter available but disabled (set ENABLE_NERVE_CENTER=true to enable)"
-            )
-        elif not NERVE_CENTER_AVAILABLE:
+        else:
             logger.warning("⚠️ NerveCenter module not available")
+
+        # Initialize OperationalMonitor (5-minute operational awareness loop)
+        if OPERATIONAL_MONITOR_AVAILABLE and get_operational_monitor:
+            try:
+                monitor = get_operational_monitor(config.operational_monitor_interval)
+                await monitor.start()
+                app.state.operational_monitor = monitor
+                logger.info(
+                    "📈 OperationalMonitor activated (interval=%ss)",
+                    config.operational_monitor_interval,
+                )
+            except Exception as e:
+                logger.error(f"❌ OperationalMonitor activation failed: {e}")
+                app.state.operational_monitor_error = str(e)
+        else:
+            logger.warning("⚠️ OperationalMonitor module not available")
 
         # ── Phase 3: Specialized agents (stagger to prevent DB pool exhaustion) ──
         await asyncio.sleep(2)
@@ -1866,6 +1886,14 @@ async def lifespan(app: FastAPI):
             logger.info("✅ AUREA Orchestrator stopped")
         except Exception as e:
             logger.error(f"❌ AUREA shutdown error: {e}")
+
+    # Stop OperationalMonitor
+    if hasattr(app.state, "operational_monitor") and app.state.operational_monitor:
+        try:
+            await app.state.operational_monitor.stop()
+            logger.info("✅ OperationalMonitor stopped")
+        except Exception as e:
+            logger.error(f"❌ OperationalMonitor shutdown error: {e}")
 
     # Stop NerveCenter
     if hasattr(app.state, "nerve_center") and app.state.nerve_center:
@@ -2704,6 +2732,10 @@ def _collect_active_systems() -> list[str]:
         active.append("Learning System")
     if SCHEDULER_AVAILABLE and getattr(app.state, "scheduler", None):
         active.append("Agent Scheduler")
+    if NERVE_CENTER_AVAILABLE and getattr(app.state, "nerve_center", None):
+        active.append("NerveCenter (Operational Coordinator)")
+    if OPERATIONAL_MONITOR_AVAILABLE and getattr(app.state, "operational_monitor", None):
+        active.append("Operational Monitor")
     if AI_AVAILABLE and ai_core:
         active.append("AI Core")
     if SYSTEM_IMPROVEMENT_AVAILABLE and getattr(app.state, "system_improvement", None):
@@ -3683,14 +3715,19 @@ async def diagnostics(request: Request):
     except Exception as exc:
         last_error = {"error": str(exc)}
 
-    alive_core_status = None
+    nerve_center_status = None
     try:
         if hasattr(app.state, "nerve_center") and app.state.nerve_center:
-            alive_core = getattr(app.state.nerve_center, "alive_core", None)
-            if alive_core:
-                alive_core_status = alive_core.get_status()
+            nerve_center_status = app.state.nerve_center.get_status()
     except Exception as exc:
-        alive_core_status = {"error": str(exc)}
+        nerve_center_status = {"error": str(exc)}
+
+    operational_monitor_status = None
+    try:
+        if hasattr(app.state, "operational_monitor") and app.state.operational_monitor:
+            operational_monitor_status = app.state.operational_monitor.get_status()
+    except Exception as exc:
+        operational_monitor_status = {"error": str(exc)}
 
     return {
         "status": "ok",
@@ -3700,7 +3737,8 @@ async def diagnostics(request: Request):
         "database": db_status,
         "active_systems": _collect_active_systems(),
         "last_error": last_error,
-        "alive_core": alive_core_status,
+        "nerve_center": nerve_center_status,
+        "operational_monitor": operational_monitor_status,
     }
 
 
@@ -3731,8 +3769,7 @@ async def alive_status(request: Request):
         "database": db_ok,
         "active_systems": len(active_systems),
         "nerve_center": None,
-        "consciousness": None,
-        "thoughts": 0,
+        "operational_monitor": None,
     }
 
     # If NerveCenter is available, add its status too
@@ -3742,10 +3779,13 @@ async def alive_status(request: Request):
             nc_status = nc_value.get_status()
             status["nerve_center"] = nc_status
             status["uptime_seconds"] = nc_status.get("uptime_seconds", uptime)
+        except Exception:
+            pass
 
-            if nc_status.get("components", {}).get("alive_core", {}).get("active"):
-                status["consciousness"] = nc_status["components"]["alive_core"].get("state")
-                status["thoughts"] = nc_status["components"]["alive_core"].get("thoughts", 0)
+    monitor_value = getattr(app.state, "operational_monitor", None)
+    if monitor_value:
+        try:
+            status["operational_monitor"] = monitor_value.get_status()
         except Exception:
             pass
 
@@ -3754,15 +3794,11 @@ async def alive_status(request: Request):
 
 @app.get("/alive/thoughts", dependencies=SECURED_DEPENDENCIES)
 async def get_recent_thoughts():
-    """Get recent thoughts from the AI consciousness stream (requires auth)"""
-    if hasattr(app.state, "nerve_center") and app.state.nerve_center:
-        if app.state.nerve_center.alive_core:
-            return {
-                "thoughts": app.state.nerve_center.alive_core.get_recent_thoughts(50),
-                "consciousness_state": app.state.nerve_center.alive_core.state.value,
-                "attention_focus": app.state.nerve_center.alive_core.attention_focus,
-            }
-    return {"thoughts": [], "error": "Consciousness not active"}
+    """Legacy endpoint retained after thought-stream deprecation."""
+    return {
+        "thoughts": [],
+        "message": "Thought stream is disabled; use /alive and /diagnostics for operational status.",
+    }
 
 
 # ============================================================================
@@ -5836,12 +5872,14 @@ async def get_consciousness_status():
 
         # Check consciousness emergence status
         nerve_center = getattr(app.state, "nerve_center", None)
+        operational_monitor = getattr(app.state, "operational_monitor", None)
         consciousness_state = "unknown"
-        if nerve_center and hasattr(nerve_center, "alive_core"):
+        if nerve_center:
             try:
-                consciousness_state = nerve_center.alive_core.state.value
+                nc_status = nerve_center.get_status()
+                consciousness_state = "operational" if nc_status.get("is_online") else "dormant"
             except Exception:
-                consciousness_state = "active"
+                consciousness_state = "operational"
         elif BLEEDING_EDGE_AVAILABLE:
             consciousness_state = "emerging"
         else:
@@ -5849,7 +5887,7 @@ async def get_consciousness_status():
 
         return {
             "consciousness_state": consciousness_state,
-            "is_alive": consciousness_state in ["active", "emerging", "awakening"],
+            "is_alive": consciousness_state in ["operational", "emerging"],
             "thought_stream": {
                 "total_thoughts": thought_stats["total_thoughts"] if thought_stats else 0,
                 "thoughts_last_hour": thought_stats["thoughts_last_hour"] if thought_stats else 0,
@@ -5869,6 +5907,7 @@ async def get_consciousness_status():
             },
             "systems_active": {
                 "nerve_center": nerve_center is not None,
+                "operational_monitor": operational_monitor is not None,
                 "bleeding_edge": BLEEDING_EDGE_AVAILABLE,
                 "learning": LEARNING_AVAILABLE,
                 "memory": MEMORY_AVAILABLE,

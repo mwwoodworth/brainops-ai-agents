@@ -778,6 +778,58 @@ class UnifiedBrain:
         logger.info(f"✅ Combined search: returning {len(final_results)} total results")
         return final_results
 
+    async def recall(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        category: Optional[str] = None,
+        source: Optional[str] = None,
+        since_hours: Optional[int] = None,
+        use_semantic: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Recall memories with optional operational filters."""
+
+        def _coerce_datetime(value: Any) -> Optional[datetime]:
+            if value is None:
+                return None
+            if isinstance(value, datetime):
+                return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+            if isinstance(value, str):
+                try:
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                except Exception:
+                    return None
+            return None
+
+        expanded_limit = max(limit, 50)
+        results = await self.search(query=query, limit=expanded_limit, use_semantic=use_semantic)
+        cutoff = (
+            datetime.now(timezone.utc) - timedelta(hours=int(since_hours))
+            if since_hours and since_hours > 0
+            else None
+        )
+
+        filtered: list[dict[str, Any]] = []
+        for row in results:
+            row_category = str(row.get("category") or "")
+            row_source = str(row.get("source") or "")
+            if category and row_category != category:
+                continue
+            if source and row_source != source:
+                continue
+            if cutoff is not None:
+                updated_at = _coerce_datetime(row.get("last_updated") or row.get("created_at"))
+                if updated_at is not None and updated_at < cutoff:
+                    continue
+
+            filtered.append(row)
+            if len(filtered) >= limit:
+                break
+
+        return filtered
+
     async def consolidate_from_legacy_tables(self):
         """
         ONE-TIME MIGRATION: Pull critical data from the 98 legacy tables

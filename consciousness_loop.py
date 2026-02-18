@@ -1,21 +1,17 @@
 #!/usr/bin/env python3
-"""
-Consciousness Loop (Guardrail-First Stub)
-========================================
-This module exists primarily to satisfy:
-- `nerve_center.py` optional import of `ConsciousnessLoop`
-- Unit tests that validate DB config guardrails via `_resolve_database_url`
+"""Compatibility shim.
 
-The previous full implementation was archived/superseded. This version is:
-- Import-safe (no DB work at import time)
-- Strict in production (requires explicit `DATABASE_URL`)
+The former ConsciousnessLoop was replaced by the operational monitor.
+Use `operational_monitor.OperationalMonitor` for all new code.
 """
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import Optional
+
+from operational_monitor import OperationalMonitor as ConsciousnessLoop
+from operational_monitor import get_operational_monitor
 
 
 def _env(name: str) -> str:
@@ -23,17 +19,7 @@ def _env(name: str) -> str:
 
 
 def _resolve_database_url(explicit_database_url: Optional[str]) -> Optional[str]:
-    """
-    Resolve database URL using explicit parameter or environment variables.
-
-    Rules:
-    - If `explicit_database_url` is provided, use it.
-    - Else if `DATABASE_URL` is set, use it.
-    - Else if individual DB_* components are present, build a URL.
-    - Else:
-      - In production: raise (must be explicit)
-      - In non-production: return None
-    """
+    """Legacy helper kept for compatibility with existing tests/importers."""
     explicit = (explicit_database_url or "").strip()
     if explicit:
         return explicit
@@ -56,20 +42,4 @@ def _resolve_database_url(explicit_database_url: Optional[str]) -> Optional[str]
     return None
 
 
-@dataclass
-class ConsciousnessLoop:
-    """
-    Minimal placeholder implementation.
-
-    NerveCenter only needs the class to exist; the autonomic systems are disabled
-    by default in config.
-    """
-
-    database_url: Optional[str] = None
-
-    async def start(self) -> None:
-        return
-
-    async def stop(self) -> None:
-        return
-
+__all__ = ["ConsciousnessLoop", "get_operational_monitor", "_resolve_database_url"]
