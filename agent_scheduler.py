@@ -181,6 +181,22 @@ ENABLE_REVENUE_DRIVE = bool(
     _revenue_drive_env and _revenue_drive_env.lower() in ("1", "true", "yes")
 )
 
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Return whether an environment-variable feature flag is enabled."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_SCHEDULER_PRIORITY_QUEUEING = _env_flag("ENABLE_SCHEDULER_PRIORITY_QUEUEING", False)
+ENABLE_SCHEDULER_EXECUTION_BUDGETS = _env_flag("ENABLE_SCHEDULER_EXECUTION_BUDGETS", False)
+DEFAULT_SCHEDULER_EXECUTION_BUDGET_SECONDS = int(
+    os.getenv("SCHEDULER_EXECUTION_BUDGET_SECONDS", "300")
+)
+
+
 # CRITICAL: Use shared connection pool to prevent MaxClientsInSessionMode
 try:
     from database.sync_pool import get_sync_pool
@@ -292,6 +308,8 @@ class AgentScheduler:
         # Use BackgroundScheduler instead of AsyncIOScheduler for FastAPI compatibility
         self.scheduler = BackgroundScheduler()
         self.registered_jobs = {}
+        self._priority_queueing_enabled = ENABLE_SCHEDULER_PRIORITY_QUEUEING
+        self._execution_budget_enabled = ENABLE_SCHEDULER_EXECUTION_BUDGETS
 
         # Initialize UnifiedBrain for persistent memory integration
         self.brain = None
@@ -319,6 +337,33 @@ class AgentScheduler:
         # Connections are now managed by the context manager
         logger.debug("return_db_connection is deprecated; connection is managed by context")
         return None
+
+    def _infer_job_priority(self, agent_name: str, frequency_minutes: int) -> int:
+        """Infer scheduler priority score for an agent job."""
+        name = (agent_name or "").lower()
+        score = 50
+        if any(token in name for token in ("monitor", "health", "healing", "critical")):
+            score += 35
+        if any(token in name for token in ("revenue", "payment", "invoice")):
+            score += 20
+        if frequency_minutes <= 5:
+            score += 15
+        elif frequency_minutes >= 60:
+            score -= 10
+        return max(0, min(100, score))
+
+    def _resolve_execution_budget_seconds(self, agent_name: str) -> int:
+        """Resolve per-agent execution budget in seconds."""
+        if not self._execution_budget_enabled:
+            return 0
+        env_key = f"SCHEDULER_BUDGET_{agent_name.upper().replace('-', '_')}_SECONDS"
+        override = os.getenv(env_key)
+        if override:
+            try:
+                return max(10, int(float(override)))
+            except Exception:
+                logger.warning("Invalid scheduler budget override %s=%s", env_key, override)
+        return max(10, DEFAULT_SCHEDULER_EXECUTION_BUDGET_SECONDS)
 
     def execute_agent(self, agent_id: str, agent_name: str):
         """Execute a scheduled agent (SYNCHRONOUS for BackgroundScheduler)"""
@@ -369,9 +414,48 @@ class AgentScheduler:
                         return
 
                     # Execute based on agent type (synchronous)
+                    scheduled_meta = next(
+                        (
+                            meta
+                            for meta in self.registered_jobs.values()
+                            if str(meta.get("agent_id")) == str(agent_id)
+                        ),
+                        {},
+                    )
+                    inferred_priority = self._infer_job_priority(
+                        agent_name,
+                        int(scheduled_meta.get("frequency_minutes", 60)),
+                    )
+                    execution_budget_seconds = self._resolve_execution_budget_seconds(agent_name)
                     start_time = datetime.utcnow()
                     result = self._execute_by_type_sync(agent, cur, conn)
                     execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+                    execution_time_seconds = execution_time_ms / 1000.0
+
+                    final_status = "completed"
+                    if (
+                        execution_budget_seconds
+                        and execution_time_seconds > float(execution_budget_seconds)
+                    ):
+                        final_status = "failed"
+                        result = {
+                            "status": "failed",
+                            "error": "scheduler_execution_budget_exceeded",
+                            "execution_time_seconds": execution_time_seconds,
+                            "execution_budget_seconds": execution_budget_seconds,
+                            "agent_name": agent_name,
+                            "priority": inferred_priority,
+                        }
+                        logger.warning(
+                            "Scheduler execution budget exceeded for %s: %.2fs > %ss",
+                            agent_name,
+                            execution_time_seconds,
+                            execution_budget_seconds,
+                        )
+                    elif isinstance(result, dict):
+                        result.setdefault("scheduler_priority", inferred_priority)
+                        if execution_budget_seconds:
+                            result.setdefault("execution_budget_seconds", execution_budget_seconds)
 
                     # Record execution completion
                     cur.execute(
@@ -380,7 +464,7 @@ class AgentScheduler:
                         SET status = %s, output_data = %s, execution_time_ms = %s
                         WHERE id = %s
                     """,
-                        ("completed", json.dumps(result), execution_time_ms, execution_id),
+                        (final_status, json.dumps(result), execution_time_ms, execution_id),
                     )
 
                     # Update agent statistics
@@ -396,7 +480,12 @@ class AgentScheduler:
                     )
 
                     conn.commit()
-                    logger.info(f"Agent {agent_name} executed successfully")
+                    logger.info(
+                        "Agent %s execution finished with status=%s priority=%s",
+                        agent_name,
+                        final_status,
+                        inferred_priority,
+                    )
 
                     # Store execution result in persistent memory for learning and context
                     if self.brain:
@@ -1511,15 +1600,30 @@ class AgentScheduler:
                     schedules = cur.fetchall()
                     logger.info(f"✅ Found {len(schedules)} enabled agent schedules")
 
+                    if self._priority_queueing_enabled:
+                        schedules = sorted(
+                            schedules,
+                            key=lambda s: self._infer_job_priority(
+                                s.get("agent_name", ""),
+                                int(s.get("frequency_minutes") or 60),
+                            ),
+                            reverse=True,
+                        )
+
                     for schedule in schedules:
+                        inferred_priority = self._infer_job_priority(
+                            schedule.get("agent_name", ""),
+                            int(schedule.get("frequency_minutes") or 60),
+                        )
                         logger.info(
-                            f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes"
+                            f"   • {schedule['agent_name']} - Every {schedule['frequency_minutes']} minutes (priority={inferred_priority})"
                         )
                         self.add_schedule(
                             agent_id=schedule["agent_id"],
                             agent_name=schedule["agent_name"],
                             frequency_minutes=schedule["frequency_minutes"] or 60,
                             schedule_id=schedule["id"],
+                            priority=inferred_priority,
                         )
                 finally:
                     cur.close()
@@ -2187,11 +2291,23 @@ class AgentScheduler:
             logger.error("Failed to schedule RevenueDrive: %s", exc, exc_info=True)
 
     def add_schedule(
-        self, agent_id: str, agent_name: str, frequency_minutes: int, schedule_id: str = None
+        self,
+        agent_id: str,
+        agent_name: str,
+        frequency_minutes: int,
+        schedule_id: str = None,
+        priority: int | None = None,
     ):
         """Add an agent to the scheduler"""
         try:
             job_id = schedule_id or str(uuid.uuid4())
+            priority_score = (
+                int(priority)
+                if priority is not None
+                else self._infer_job_priority(agent_name, frequency_minutes)
+            )
+            misfire_grace_time = 30 if priority_score >= 80 else 300
+            coalesce = priority_score >= 80
 
             # Add job to scheduler
             self.scheduler.add_job(
@@ -2200,6 +2316,8 @@ class AgentScheduler:
                 args=[agent_id, agent_name],
                 id=job_id,
                 name=f"Agent: {agent_name}",
+                misfire_grace_time=misfire_grace_time,
+                coalesce=coalesce,
                 replace_existing=True,
             )
 
@@ -2207,11 +2325,17 @@ class AgentScheduler:
                 "agent_id": agent_id,
                 "agent_name": agent_name,
                 "frequency_minutes": frequency_minutes,
+                "priority": priority_score,
                 "added_at": datetime.utcnow().isoformat(),
             }
 
             logger.info(
-                f"✅ Scheduled agent {agent_name} (ID: {job_id}) to run every {frequency_minutes} minutes"
+                "✅ Scheduled agent %s (ID: %s) every %s minutes (priority=%s, coalesce=%s)",
+                agent_name,
+                job_id,
+                frequency_minutes,
+                priority_score,
+                coalesce,
             )
 
         except Exception as e:
@@ -2260,6 +2384,7 @@ class AgentScheduler:
                     "id": job_id,
                     "agent": job_info["agent_name"],
                     "frequency_minutes": job_info["frequency_minutes"],
+                    "priority": job_info.get("priority"),
                 }
                 for job_id, job_info in self.registered_jobs.items()
             ],

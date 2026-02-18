@@ -15,11 +15,19 @@ Part of Revenue Perfection Session.
 """
 
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 import json
 
 logger = logging.getLogger(__name__)
+
+ENABLE_REVENUE_LIFECYCLE_AUTOMATION = (
+    os.getenv("ENABLE_REVENUE_LIFECYCLE_AUTOMATION", "true").strip().lower() in {"1", "true", "yes", "on"}
+)
+ENABLE_ADVANCED_LEAD_SCORING = (
+    os.getenv("ENABLE_REVENUE_ADVANCED_SCORING", "true").strip().lower() in {"1", "true", "yes", "on"}
+)
 
 
 def _parse_metadata(metadata: Any) -> dict:
@@ -152,7 +160,9 @@ class RevenueOperator:
         has_enrichment: bool
     ) -> dict:
         """Determine the next best action for a lead."""
-        if stage == "new":
+        stage_norm = (stage or "").strip().lower()
+
+        if stage_norm in {"new", "new_real"}:
             if not has_enrichment:
                 return {
                     "lead_id": lead_id[:8] + "...",
@@ -174,7 +184,18 @@ class RevenueOperator:
                     "reason": "Enriched lead ready for initial outreach"
                 }
 
-        elif stage == "contacted":
+        elif stage_norm in {"enriched", "contact_ready"}:
+            return {
+                "lead_id": lead_id[:8] + "...",
+                "company": company,
+                "current_stage": stage,
+                "action": "DRAFT_OUTREACH",
+                "api_call": f"POST /outreach/leads/{lead_id}/draft",
+                "priority": "high",
+                "reason": "Lead is contact-ready and should enter outreach"
+            }
+
+        elif stage_norm in {"contacted", "outreach_sent"}:
             if days_stale > 7:
                 return {
                     "lead_id": lead_id[:8] + "...",
@@ -195,7 +216,18 @@ class RevenueOperator:
                     "reason": "Recently contacted - waiting for response"
                 }
 
-        elif stage == "qualified":
+        elif stage_norm in {"replied"}:
+            return {
+                "lead_id": lead_id[:8] + "...",
+                "company": company,
+                "current_stage": stage,
+                "action": "BOOK_MEETING",
+                "api_call": "Manual: Book discovery or closing call",
+                "priority": "high",
+                "reason": "Lead replied and should be progressed to meeting"
+            }
+
+        elif stage_norm in {"qualified", "meeting_booked", "proposal_drafted"}:
             return {
                 "lead_id": lead_id[:8] + "...",
                 "company": company,
@@ -206,7 +238,7 @@ class RevenueOperator:
                 "reason": "Qualified lead ready for proposal"
             }
 
-        elif stage == "proposal_sent":
+        elif stage_norm in {"proposal_sent", "proposal_approved"}:
             if days_stale > 3:
                 return {
                     "lead_id": lead_id[:8] + "...",
@@ -227,7 +259,7 @@ class RevenueOperator:
                     "reason": "Waiting for proposal response"
                 }
 
-        elif stage == "negotiating":
+        elif stage_norm in {"negotiating", "won_invoice_pending"}:
             return {
                 "lead_id": lead_id[:8] + "...",
                 "company": company,
@@ -236,6 +268,17 @@ class RevenueOperator:
                 "api_call": "Manual: Schedule call to close",
                 "priority": "critical",
                 "reason": "Lead in negotiation - push to close"
+            }
+
+        elif stage_norm in {"invoiced"}:
+            return {
+                "lead_id": lead_id[:8] + "...",
+                "company": company,
+                "current_stage": stage,
+                "action": "CAPTURE_PAYMENT",
+                "api_call": "POST /payments/invoices/retry-outstanding",
+                "priority": "critical",
+                "reason": "Invoice sent; actively collect payment"
             }
 
         return {
@@ -407,6 +450,202 @@ class RevenueOperator:
             "proposals": proposals_created,
             "note": "All proposals require human approval before sending"
         }
+
+    async def _score_recent_leads(self, limit: int = 25) -> dict[str, Any]:
+        """Run advanced scoring for active leads and write back score hints."""
+        if not ENABLE_ADVANCED_LEAD_SCORING:
+            return {"status": "skipped", "reason": "ENABLE_REVENUE_ADVANCED_SCORING=false"}
+
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        try:
+            from advanced_lead_scoring import AdvancedLeadScoringEngine
+
+            scorer = AdvancedLeadScoringEngine()
+            leads = await pool.fetch(
+                """
+                SELECT id
+                FROM revenue_leads
+                WHERE stage NOT IN ('won', 'lost')
+                ORDER BY updated_at DESC NULLS LAST, created_at DESC
+                LIMIT $1
+                """,
+                max(1, limit),
+            )
+            scored = 0
+            failed = 0
+            for lead in leads:
+                lead_id = str(lead["id"])
+                try:
+                    result = await scorer.calculate_multi_factor_score(lead_id)
+                    await pool.execute(
+                        """
+                        UPDATE revenue_leads
+                        SET score = $1,
+                            updated_at = $2,
+                            metadata = COALESCE(metadata, '{}'::jsonb) || $3::jsonb
+                        WHERE id = $4
+                        """,
+                        float(result.composite_score) / 100.0,
+                        datetime.now(timezone.utc),
+                        json.dumps(
+                            {
+                                "advanced_scoring": {
+                                    "composite": float(result.composite_score),
+                                    "tier": result.tier.value,
+                                    "probability_conversion_30d": float(result.probability_conversion_30d),
+                                    "next_best_action": result.next_best_action,
+                                    "scored_at": datetime.now(timezone.utc).isoformat(),
+                                }
+                            }
+                        ),
+                        lead["id"],
+                    )
+                    scored += 1
+                except Exception:
+                    failed += 1
+
+            return {"status": "completed", "scored": scored, "failed": failed}
+        except Exception as exc:
+            return {"status": "error", "error": str(exc)}
+
+    async def _create_and_send_invoices(self, limit: int = 10) -> dict[str, Any]:
+        """Create and send invoices for ready proposals."""
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        from payment_capture import get_payment_capture
+
+        pc = get_payment_capture()
+        proposals = await pool.fetch(
+            """
+            SELECT p.id
+            FROM ai_proposals p
+            LEFT JOIN ai_invoices i ON i.proposal_id = p.id
+            WHERE p.status IN ('approved', 'sent')
+              AND i.id IS NULL
+            ORDER BY p.updated_at DESC NULLS LAST, p.created_at DESC
+            LIMIT $1
+            """,
+            max(1, limit),
+        )
+
+        created = 0
+        sent = 0
+        errors = 0
+        for proposal in proposals:
+            success, _msg, invoice = await pc.create_invoice(str(proposal["id"]))
+            if not success or not invoice:
+                errors += 1
+                continue
+            created += 1
+            sent_ok, _ = await pc.send_invoice(invoice.id)
+            if sent_ok:
+                sent += 1
+
+        return {
+            "status": "completed",
+            "created": created,
+            "sent": sent,
+            "errors": errors,
+        }
+
+    async def run_full_lifecycle(
+        self,
+        limit: int = 25,
+        auto_send_outreach: bool = False,
+    ) -> dict[str, Any]:
+        """
+        Execute end-to-end lifecycle orchestration:
+        discovery -> scoring -> nurture -> proposal -> close support -> invoice -> payment retries.
+        """
+        if not ENABLE_REVENUE_LIFECYCLE_AUTOMATION:
+            return {
+                "status": "disabled",
+                "reason": "ENABLE_REVENUE_LIFECYCLE_AUTOMATION=false",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        killed, reason = await self.check_kill_switches()
+        if killed:
+            return {
+                "status": "blocked",
+                "reason": reason,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+
+        results: dict[str, Any] = {"timestamp": datetime.now(timezone.utc).isoformat(), "status": "running"}
+
+        # 1) Discovery
+        try:
+            from revenue_pipeline_agents import LeadDiscoveryAgentReal
+
+            discovery_agent = LeadDiscoveryAgentReal()
+            results["discovery"] = await discovery_agent.execute({"action": "discover_all"})
+        except Exception as exc:
+            results["discovery"] = {"status": "error", "error": str(exc)}
+
+        # 2) Scoring
+        results["scoring"] = await self._score_recent_leads(limit=limit)
+
+        # 3) Nurture
+        try:
+            from revenue_pipeline_agents import NurtureExecutorAgentReal
+
+            nurture_agent = NurtureExecutorAgentReal()
+            results["nurture"] = await nurture_agent.execute({"action": "nurture_new_leads"})
+        except Exception as exc:
+            results["nurture"] = {"status": "error", "error": str(exc)}
+
+        # 4) Outreach acceleration (optional)
+        if auto_send_outreach:
+            try:
+                from outreach_engine import get_outreach_engine
+                from database.async_connection import get_pool
+
+                engine = get_outreach_engine()
+                pool = get_pool()
+                leads = await pool.fetch(
+                    """
+                    SELECT rl.id
+                    FROM revenue_leads rl
+                    WHERE rl.stage IN ('new', 'contacted', 'qualified')
+                    ORDER BY rl.score DESC NULLS LAST, rl.updated_at ASC
+                    LIMIT $1
+                    """,
+                    max(1, min(limit, 50)),
+                )
+                drafted = 0
+                for lead in leads:
+                    ok, _, _ = await engine.generate_outreach_draft(str(lead["id"]), 1)
+                    if ok:
+                        drafted += 1
+                results["outreach"] = {"status": "completed", "drafted": drafted}
+            except Exception as exc:
+                results["outreach"] = {"status": "error", "error": str(exc)}
+        else:
+            results["outreach"] = {"status": "skipped", "reason": "auto_send_outreach=false"}
+
+        # 5) Proposal drafting
+        results["proposals"] = await self.auto_draft_proposals(limit=max(1, min(limit, 20)))
+
+        # 6) Invoicing
+        results["invoices"] = await self._create_and_send_invoices(limit=max(1, min(limit, 20)))
+
+        # 7) Payment retries
+        try:
+            from payment_capture import get_payment_capture
+
+            pc = get_payment_capture()
+            results["payments"] = await pc.retry_outstanding_payments(max_invoices=max(1, min(limit, 50)))
+        except Exception as exc:
+            results["payments"] = {"status": "error", "error": str(exc)}
+
+        results["status"] = "completed"
+        return results
 
 
 # Singleton instance

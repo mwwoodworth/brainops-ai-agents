@@ -291,6 +291,7 @@ from api.observability import (
 )
 from api.revenue import router as revenue_router
 from api.taskmate import router as taskmate_router  # P1-TASKMATE-001: Cross-model task manager
+from api.full_power_crud import router as full_power_crud_router  # Full CRUD + lifecycle control plane
 from api.revenue_automation import router as revenue_automation_router
 from api.income_streams import router as income_streams_router  # Automated Income Streams
 from api.revenue_complete import router as revenue_complete_router  # Complete Revenue API
@@ -2135,8 +2136,8 @@ _API_KEY_ERROR_LOG_INTERVAL = 60  # Only log same path/error once per minute
 
 
 async def verify_api_key(
-    request: Optional[Request] = None,
-    websocket: Optional[WebSocket] = None,
+    request: Request = None,
+    websocket: WebSocket = None,
 ) -> bool:
     """
     Verify authentication using either API Key or JWT.
@@ -2287,6 +2288,9 @@ app.include_router(revenue_router, dependencies=SECURED_DEPENDENCIES)  # Revenue
 app.include_router(
     taskmate_router, dependencies=SECURED_DEPENDENCIES
 )  # P1-TASKMATE-001: Cross-model task manager
+app.include_router(
+    full_power_crud_router, dependencies=SECURED_DEPENDENCIES
+)  # Full Power API v2 - CRUD, pagination, filtering, lifecycle controls
 app.include_router(
     revenue_complete_router, dependencies=SECURED_DEPENDENCIES
 )  # Complete Revenue API with billing
@@ -4650,6 +4654,69 @@ async def get_agent(agent_id: str, authenticated: bool = Depends(verify_api_key)
     except Exception as e:
         logger.error(f"Failed to get agent: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}") from e
+
+
+@app.get("/agents/{agent_id}/history")
+async def get_agent_history(
+    agent_id: str,
+    limit: int = Query(50, ge=1, le=500),
+    authenticated: bool = Depends(verify_api_key),
+):
+    """Get execution history for a specific agent."""
+    pool = get_pool()
+
+    try:
+        agent = await pool.fetchrow(
+            "SELECT id, name FROM agents WHERE id::text = $1 OR name = $1",
+            agent_id,
+        )
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+
+        agent_name = agent["name"]
+        rows = await pool.fetch(
+            """
+            SELECT id, status, task_type, input_data, output_data, error_message,
+                   execution_time_ms, created_at
+            FROM ai_agent_executions
+            WHERE agent_name = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            agent_name,
+            limit,
+        )
+
+        history = []
+        for row in rows:
+            data = row if isinstance(row, dict) else dict(row)
+            history.append(
+                {
+                    "execution_id": str(data.get("id")),
+                    "status": data.get("status"),
+                    "task_type": data.get("task_type"),
+                    "input_data": data.get("input_data"),
+                    "output_data": data.get("output_data"),
+                    "error": data.get("error_message"),
+                    "duration_ms": data.get("execution_time_ms"),
+                    "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+                }
+            )
+
+        return {
+            "agent_id": str(agent["id"]),
+            "agent_name": agent_name,
+            "history": history,
+            "count": len(history),
+        }
+    except HTTPException:
+        raise
+    except DatabaseUnavailableError as exc:
+        logger.error("Database unavailable while loading agent history", exc_info=True)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as e:
+        logger.error("Failed to get agent history: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to retrieve agent history") from e
 
 
 @app.get("/executions")

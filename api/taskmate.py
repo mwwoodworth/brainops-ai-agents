@@ -203,6 +203,29 @@ async def update_task(
     return dict(row)
 
 
+@router.delete("/tasks/{task_id}")
+async def delete_task(
+    task_id: str,
+    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
+):
+    pool = await _check_tables()
+    tenant_id = await _get_tenant_id(x_tenant_id)
+
+    row = await pool.fetchrow(
+        """
+        DELETE FROM taskmate_tasks
+        WHERE task_id = $1 AND tenant_id = $2::uuid
+        RETURNING id, task_id
+        """,
+        task_id,
+        tenant_id,
+    )
+    if not row:
+        raise HTTPException(404, f"Task {task_id} not found")
+
+    return {"deleted": True, "id": row["id"], "task_id": row["task_id"]}
+
+
 @router.get("/tasks/{task_id}")
 async def get_task(
     task_id: str,

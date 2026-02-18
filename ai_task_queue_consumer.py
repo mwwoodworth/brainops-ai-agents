@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from safe_task import create_safe_task
-from database.async_connection import get_pool
+from database.async_connection import get_pool, get_tenant_pool
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,41 @@ DEFAULT_TENANT_ID = (
     or os.getenv("TENANT_ID")
     or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
 )
+
+
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Return whether an environment-variable feature flag is enabled."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_AI_TASK_PRIORITY_PREEMPTION = _env_flag("ENABLE_AI_TASK_PRIORITY_PREEMPTION", False)
+ENABLE_AI_TASK_EXECUTION_BUDGETS = _env_flag("ENABLE_AI_TASK_EXECUTION_BUDGETS", False)
+ENABLE_AI_TASK_MULTI_AGENT_ROUTING = _env_flag("ENABLE_AI_TASK_MULTI_AGENT_ROUTING", False)
+CRITICAL_TASK_PRIORITY_THRESHOLD = int(os.getenv("AI_TASK_QUEUE_CRITICAL_PRIORITY", "90"))
+
+
+def _priority_value(priority: Any) -> int:
+    """Normalize queue priority into comparable integer value."""
+    if isinstance(priority, (int, float)):
+        return int(priority)
+    if isinstance(priority, str):
+        lowered = priority.strip().lower()
+        if lowered in {"critical", "urgent", "p0"}:
+            return 100
+        if lowered in {"high", "p1"}:
+            return 75
+        if lowered in {"medium", "normal", "p2"}:
+            return 50
+        if lowered in {"low", "p3"}:
+            return 25
+        try:
+            return int(float(lowered))
+        except Exception:
+            return 0
+    return 0
 
 
 def _is_test_email(email: str | None) -> bool:
@@ -244,9 +279,93 @@ class AITaskQueueConsumer:
             logger.error("Failed to fetch ai_task_queue tasks: %s", exc)
             return []
 
+    async def _has_higher_priority_pending(self, current_priority: int) -> bool:
+        """Return True when a higher-priority pending task exists."""
+        if not ENABLE_AI_TASK_PRIORITY_PREEMPTION:
+            return False
+        if current_priority >= CRITICAL_TASK_PRIORITY_THRESHOLD:
+            return False
+
+        try:
+            tenant_pool = get_tenant_pool(DEFAULT_TENANT_ID)
+            conn = await tenant_pool.acquire()
+            try:
+                higher = await conn.fetchval(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1
+                        FROM ai_task_queue
+                        WHERE status = 'pending'
+                          AND priority >= $1
+                    )
+                    """,
+                    CRITICAL_TASK_PRIORITY_THRESHOLD,
+                )
+                return bool(higher)
+            finally:
+                await tenant_pool.release(conn)
+        except Exception as exc:
+            logger.warning("Priority preemption check failed: %s", exc)
+            return False
+
+    async def _requeue_for_preemption(self, task_id: str, current_priority: int) -> bool:
+        """Requeue a task to allow higher-priority work to preempt."""
+        if not ENABLE_AI_TASK_PRIORITY_PREEMPTION:
+            return False
+
+        should_preempt = await self._has_higher_priority_pending(current_priority)
+        if not should_preempt:
+            return False
+
+        try:
+            tenant_pool = get_tenant_pool(DEFAULT_TENANT_ID)
+            conn = await tenant_pool.acquire()
+            try:
+                await conn.execute(
+                    """
+                    UPDATE ai_task_queue
+                    SET status = 'pending',
+                        started_at = NULL,
+                        updated_at = NOW(),
+                        error_message = $1
+                    WHERE id = $2
+                    """,
+                    "preempted_by_critical_priority",
+                    task_id,
+                )
+            finally:
+                await tenant_pool.release(conn)
+            logger.info("⏭️ Preempted ai_task_queue task %s (priority=%s)", task_id, current_priority)
+            return True
+        except Exception as exc:
+            logger.warning("Failed to requeue preempted task %s: %s", task_id, exc)
+            return False
+
+    def _resolve_task_timeout(self, task_type: str, task_priority: int) -> float:
+        """Resolve execution timeout with optional priority-aware budgets."""
+        timeout_seconds = float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60"))
+        if task_type == "self_build":
+            timeout_seconds = float(os.getenv("AI_TASK_QUEUE_SELF_BUILD_TIMEOUT_SECONDS", "900"))
+        elif task_type == "revenue_prompt_compile":
+            timeout_seconds = float(os.getenv("AI_TASK_QUEUE_DSPY_COMPILE_TIMEOUT_SECONDS", "600"))
+
+        if ENABLE_AI_TASK_EXECUTION_BUDGETS:
+            if task_priority >= CRITICAL_TASK_PRIORITY_THRESHOLD:
+                timeout_seconds = min(
+                    timeout_seconds,
+                    float(os.getenv("AI_TASK_QUEUE_CRITICAL_TIMEOUT_SECONDS", "45")),
+                )
+            elif task_priority <= 25:
+                timeout_seconds = min(
+                    timeout_seconds,
+                    float(os.getenv("AI_TASK_QUEUE_LOW_PRIORITY_TIMEOUT_SECONDS", "30")),
+                )
+        return timeout_seconds
+
     async def _process_task(self, task: dict[str, Any]):
         task_id = str(task.get("id"))
         task_type = (task.get("task_type") or "").lower()
+        task_priority = _priority_value(task.get("priority"))
         payload = task.get("payload") or {}
         if isinstance(payload, str):
             try:
@@ -273,13 +392,12 @@ class AITaskQueueConsumer:
         tenant_id = str(tenant_raw) if tenant_raw else DEFAULT_TENANT_ID
 
         started_at = time.time()
+        timeout_seconds = self._resolve_task_timeout(task_type, task_priority)
 
         try:
-            timeout_seconds = float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60"))
-            if task_type == "self_build":
-                timeout_seconds = float(os.getenv("AI_TASK_QUEUE_SELF_BUILD_TIMEOUT_SECONDS", "900"))
-            elif task_type == "revenue_prompt_compile":
-                timeout_seconds = float(os.getenv("AI_TASK_QUEUE_DSPY_COMPILE_TIMEOUT_SECONDS", "600"))
+            if await self._requeue_for_preemption(task_id, task_priority):
+                self._stats["tasks_skipped"] += 1
+                return
 
             if task_type == "lead_nurturing":
                 result = await asyncio.wait_for(
@@ -299,6 +417,11 @@ class AITaskQueueConsumer:
             elif task_type == "revenue_prompt_compile":
                 result = await asyncio.wait_for(
                     self._handle_revenue_prompt_compile(task_id, tenant_id, payload),
+                    timeout=timeout_seconds,
+                )
+            elif task_type == "multi_agent_collaboration":
+                result = await asyncio.wait_for(
+                    self._handle_multi_agent_collaboration(task_id, tenant_id, payload),
                     timeout=timeout_seconds,
                 )
             else:
@@ -326,7 +449,7 @@ class AITaskQueueConsumer:
             result = {
                 "status": "failed",
                 "error": "timeout",
-                "timeout_seconds": float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60")),
+                "timeout_seconds": timeout_seconds,
                 "task_type": task_type,
             }
             await self._update_task_status(task_id, "failed", result, duration_ms)
@@ -502,6 +625,42 @@ class AITaskQueueConsumer:
         if reason:
             result["reason"] = reason
         return result
+
+    async def _handle_multi_agent_collaboration(
+        self,
+        task_id: str,
+        tenant_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Dispatch multi-agent collaboration payloads into AgentExecutor."""
+        if not self._executor:
+            raise RuntimeError("AgentExecutor not available")
+        if not ENABLE_AI_TASK_MULTI_AGENT_ROUTING:
+            return {"status": "skipped", "reason": "multi_agent_routing_disabled"}
+
+        primary_agent = payload.get("primary_agent") or payload.get("agent") or "WorkflowEngine"
+        collaborative_task = {
+            "task_id": task_id,
+            "tenant_id": tenant_id,
+            "action": payload.get("action") or "collaborative_task",
+            "description": payload.get("description"),
+            "multi_agent": True,
+            "collaborative": True,
+            "delegation_plan": payload.get("delegation_plan"),
+            "delegate_to": payload.get("delegate_to"),
+            "required_capabilities": payload.get("required_capabilities"),
+            "aggregation_strategy": payload.get("aggregation_strategy", "merge_dict"),
+            "execution_time_budget_seconds": payload.get("execution_time_budget_seconds"),
+            "token_budget": payload.get("token_budget"),
+            "_skip_langchain_runtime": True,
+        }
+        if isinstance(payload.get("task"), dict):
+            collaborative_task.update(payload["task"])
+
+        result = await self._executor.execute(primary_agent, collaborative_task)
+        if isinstance(result, dict) and result.get("status") in {"failed", "error"}:
+            return {"status": "failed", "error": result.get("error"), "result": result}
+        return {"status": "completed", "result": result}
 
     async def _update_task_status(
         self,

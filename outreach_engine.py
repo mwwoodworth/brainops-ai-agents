@@ -15,8 +15,10 @@ Part of Revenue Perfection Session.
 """
 
 import logging
+import os
 import re
 import uuid
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
@@ -41,6 +43,15 @@ BAD_EMAIL_DOMAINS = (
     'example.com', 'test.com', 'sentry.io', 'google.com',
     'facebook.com', 'twitter.com', 'instagram.com', 'linkedin.com'
 )
+
+
+def _env_flag(name: str, default: str = "false") -> bool:
+    value = (os.getenv(name, default) or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+ENABLE_OUTREACH_AB_TESTING = _env_flag("OUTREACH_ENABLE_AB_TESTING", "true")
+ENABLE_SEND_TIME_OPTIMIZATION = _env_flag("OUTREACH_ENABLE_SEND_TIME_OPTIMIZATION", "true")
 
 def _parse_metadata(metadata: Any) -> dict:
     """Parse metadata field which may be a string or dict."""
@@ -235,6 +246,81 @@ class OutreachEngine:
             self._last_count_reset = today
 
         return self._daily_enrichment_count, self._daily_outreach_count
+
+    def _select_ab_variant(self, lead_id: str, sequence_step: int) -> str:
+        """Deterministically assign A/B variant for consistent experiments."""
+        if not ENABLE_OUTREACH_AB_TESTING:
+            return "A"
+        key = f"{lead_id}:{sequence_step}"
+        digest = hashlib.sha1(key.encode("utf-8")).hexdigest()
+        return "A" if int(digest[:2], 16) % 2 == 0 else "B"
+
+    def _apply_ab_variant(
+        self,
+        subject: str,
+        body: str,
+        variant: str,
+        is_roofing: bool,
+    ) -> tuple[str, str]:
+        """Apply variant-specific copy tweaks while preserving core offer."""
+        if variant != "B":
+            return subject, body
+
+        if is_roofing:
+            subject_b = f"{subject} (2-minute roof estimate demo)"
+            body_b = body.replace(
+                "Would love to get your feedback on it.",
+                "Could I send a 2-minute walkthrough tailored to your latest projects?",
+            )
+        else:
+            subject_b = f"{subject} | practical toolkit inside"
+            body_b = body.replace(
+                "Worth a look?",
+                "Want me to send the highest-ROI kit for your stack?",
+            )
+
+        return subject_b, body_b
+
+    async def _optimized_send_time(self, lead_id: str, fallback: datetime) -> datetime:
+        """Schedule outreach close to the lead's best engagement hour."""
+        if not ENABLE_SEND_TIME_OPTIMIZATION:
+            return fallback
+
+        pool = self._get_pool()
+        if not pool:
+            return fallback
+
+        try:
+            row = await pool.fetchrow(
+                """
+                SELECT EXTRACT(HOUR FROM COALESCE(completed_at, created_at))::int AS best_hour,
+                       COUNT(*) AS events
+                FROM lead_activities
+                WHERE lead_id = $1
+                  AND event_type = ANY($2::text[])
+                  AND created_at > NOW() - INTERVAL '60 days'
+                GROUP BY 1
+                ORDER BY events DESC, best_hour ASC
+                LIMIT 1
+                """,
+                uuid.UUID(lead_id) if isinstance(lead_id, str) else lead_id,
+                ["email_open", "email_click", "reply_received", "outreach_sent"],
+            )
+            if not row or row["best_hour"] is None:
+                return fallback
+
+            candidate = fallback.replace(
+                hour=int(row["best_hour"]),
+                minute=15,
+                second=0,
+                microsecond=0,
+            )
+            if candidate <= fallback + timedelta(minutes=5):
+                candidate = candidate + timedelta(days=1)
+            return candidate
+        except Exception as exc:
+            logger.debug("Send-time optimization unavailable: %s", exc)
+            return fallback
 
     async def get_real_leads(self, limit: int = 100, campaign_id: str = None) -> list[dict]:
         """Get REAL leads (not test/demo), optionally filtered by campaign."""
@@ -485,6 +571,14 @@ class OutreachEngine:
                     except Exception as exc:
                         logger.debug("DSPy revenue optimizer unavailable: %s", exc)
 
+                    ab_variant = self._select_ab_variant(str(lead["id"]), sequence_step)
+                    subject, body = self._apply_ab_variant(
+                        subject=subject,
+                        body=body,
+                        variant=ab_variant,
+                        is_roofing="roof" in str(getattr(campaign, "campaign_type", "")).lower(),
+                    )
+
                     # Create draft
                     draft_id = str(uuid.uuid4())
                     draft = OutreachDraft(
@@ -512,6 +606,8 @@ class OutreachEngine:
                                 "body": body,
                                 "status": "draft",
                                 "campaign_id": str(campaign_id),
+                                "ab_variant": ab_variant,
+                                "ab_enabled": ENABLE_OUTREACH_AB_TESTING,
                                 "prompt_optimizer": optimizer_meta,
                             }
                         ),
@@ -611,6 +707,14 @@ class OutreachEngine:
         except Exception as exc:
             logger.debug("DSPy revenue optimizer unavailable: %s", exc)
 
+        ab_variant = self._select_ab_variant(str(lead["id"]), sequence_step)
+        subject, body = self._apply_ab_variant(
+            subject=subject,
+            body=body,
+            variant=ab_variant,
+            is_roofing=is_roofing,
+        )
+
         # Create draft
         draft_id = str(uuid.uuid4())
         draft = OutreachDraft(
@@ -636,6 +740,8 @@ class OutreachEngine:
                     "subject": subject,
                     "body": body,
                     "status": "draft",
+                    "ab_variant": ab_variant,
+                    "ab_enabled": ENABLE_OUTREACH_AB_TESTING,
                     "prompt_optimizer": optimizer_meta,
                 }),
                 datetime.now(timezone.utc)
@@ -755,12 +861,17 @@ class OutreachEngine:
 
             # Queue email
             now = datetime.now(timezone.utc)
+            scheduled_for = await self._optimized_send_time(str(draft["lead_id"]), now)
+            ab_variant = action_data.get("ab_variant")
             email_metadata = {
                 "source": "outreach_engine",
                 "draft_id": draft_id,
                 "lead_id": str(draft["lead_id"]),
                 "approved_by": approved_by,
                 "sequence_step": action_data.get("sequence_step"),
+                "ab_variant": ab_variant,
+                "scheduled_for": scheduled_for.isoformat(),
+                "send_time_optimized": bool(ENABLE_SEND_TIME_OPTIMIZATION and scheduled_for != now),
             }
             await pool.execute("""
                 INSERT INTO ai_email_queue (id, recipient, subject, body, status, scheduled_for, created_at, metadata)
@@ -770,7 +881,7 @@ class OutreachEngine:
                 lead["email"],
                 action_data.get("subject"),
                 action_data.get("body"),
-                now,
+                scheduled_for,
                 json.dumps(email_metadata),
             )
 
@@ -810,7 +921,15 @@ class OutreachEngine:
                     draft["lead_id"],
                     "email",
                     action_data.get("subject") or "Outreach",
-                    json.dumps({"draft_id": draft_id, "sequence_step": sequence_step, "channel": "email"}, default=str),
+                    json.dumps(
+                        {
+                            "draft_id": draft_id,
+                            "sequence_step": sequence_step,
+                            "channel": "email",
+                            "ab_variant": ab_variant,
+                        },
+                        default=str,
+                    ),
                     "sent",
                     now,
                     approved_by,
@@ -877,6 +996,130 @@ class OutreachEngine:
             logger.error(f"Failed to log reply: {e}")
             return False, str(e)
 
+    async def track_engagement_event(
+        self,
+        lead_id: str,
+        event_type: str,
+        event_value: float = 1.0,
+        metadata: Optional[dict[str, Any]] = None,
+        actor: str = "system:outreach_tracking",
+    ) -> tuple[bool, str]:
+        """Track opens/clicks/replies for scoring and A/B analytics."""
+        allowed = {"email_open", "email_click", "reply_received", "meeting_booked"}
+        if event_type not in allowed:
+            return False, f"Unsupported event_type '{event_type}'. Allowed: {sorted(allowed)}"
+
+        pool = self._get_pool()
+        if not pool:
+            return False, "Database not available"
+
+        now = datetime.now(timezone.utc)
+        payload = metadata or {}
+        try:
+            await pool.execute(
+                """
+                INSERT INTO lead_activities (
+                    id, lead_id, activity_type, subject, description,
+                    outcome, completed_at, created_at, created_by, event_type, event_value
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10)
+                """,
+                uuid.uuid4(),
+                uuid.UUID(lead_id),
+                "engagement",
+                event_type.replace("_", " ").title(),
+                json.dumps(payload, default=str),
+                "recorded",
+                now,
+                actor,
+                event_type,
+                event_value,
+            )
+            return True, "Engagement recorded"
+        except Exception as exc:
+            logger.error("Failed to track engagement for lead %s: %s", lead_id, exc)
+            return False, str(exc)
+
+    async def get_ab_test_stats(self, days: int = 30) -> dict[str, Any]:
+        """Return A/B performance summary for outreach variants."""
+        pool = self._get_pool()
+        if not pool:
+            return {"status": "error", "error": "Database not available"}
+
+        try:
+            rows = await pool.fetch(
+                """
+                WITH sent AS (
+                    SELECT
+                        lead_id,
+                        COALESCE(action_data->>'ab_variant', 'A') AS variant,
+                        created_at
+                    FROM revenue_actions
+                    WHERE action_type = 'outreach_draft'
+                      AND action_data->>'status' = 'sent'
+                      AND created_at > NOW() - ($1::text || ' days')::interval
+                )
+                SELECT
+                    s.variant,
+                    COUNT(*) AS sent_count,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM lead_activities la
+                            WHERE la.lead_id = s.lead_id
+                              AND la.event_type = 'email_open'
+                              AND la.created_at >= s.created_at
+                        )
+                    ) AS opens,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM lead_activities la
+                            WHERE la.lead_id = s.lead_id
+                              AND la.event_type = 'email_click'
+                              AND la.created_at >= s.created_at
+                        )
+                    ) AS clicks,
+                    COUNT(*) FILTER (
+                        WHERE EXISTS (
+                            SELECT 1
+                            FROM lead_activities la
+                            WHERE la.lead_id = s.lead_id
+                              AND la.event_type = 'reply_received'
+                              AND la.created_at >= s.created_at
+                        )
+                    ) AS replies
+                FROM sent s
+                GROUP BY s.variant
+                ORDER BY s.variant
+                """,
+                max(1, days),
+            )
+            stats: list[dict[str, Any]] = []
+            for row in rows:
+                sent_count = int(row["sent_count"] or 0)
+                stats.append(
+                    {
+                        "variant": row["variant"],
+                        "sent": sent_count,
+                        "opens": int(row["opens"] or 0),
+                        "clicks": int(row["clicks"] or 0),
+                        "replies": int(row["replies"] or 0),
+                        "open_rate": (float(row["opens"] or 0) / sent_count) if sent_count else 0.0,
+                        "click_rate": (float(row["clicks"] or 0) / sent_count) if sent_count else 0.0,
+                        "reply_rate": (float(row["replies"] or 0) / sent_count) if sent_count else 0.0,
+                    }
+                )
+
+            return {
+                "status": "ok",
+                "ab_testing_enabled": ENABLE_OUTREACH_AB_TESTING,
+                "window_days": max(1, days),
+                "variants": stats,
+            }
+        except Exception as exc:
+            logger.error("Failed to compute A/B stats: %s", exc)
+            return {"status": "error", "error": str(exc)}
+
     async def get_outreach_stats(self) -> dict:
         """Get outreach statistics."""
         pool = self._get_pool()
@@ -898,6 +1141,10 @@ class OutreachEngine:
             "daily_limits": {
                 "enrichment": {"used": enrichment_count, "limit": 100},
                 "outreach": {"used": outreach_count, "limit": 50}
+            },
+            "features": {
+                "ab_testing": ENABLE_OUTREACH_AB_TESTING,
+                "send_time_optimization": ENABLE_SEND_TIME_OPTIMIZATION,
             },
             "drafts": {
                 "total": sum(status_counts.values()),

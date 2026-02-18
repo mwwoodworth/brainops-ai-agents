@@ -16,9 +16,9 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 # Database
 import psycopg2
@@ -245,6 +245,73 @@ class AdvancedLeadScoringEngine:
             raise ValueError("DATABASE_URL not configured")
         return psycopg2.connect(self.db_url)
 
+    @staticmethod
+    def _coerce_float(value: Any, default: float = 0.0) -> float:
+        """Best-effort numeric coercion for external lead payloads."""
+        try:
+            if value is None:
+                return default
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _normalize_company_size(value: Any, default: int = 50) -> int:
+        """Normalize company size to an employee-count estimate."""
+        if isinstance(value, (int, float)):
+            return max(1, int(value))
+
+        if not value:
+            return default
+
+        text = str(value).strip().lower()
+        common_bands = {
+            "micro": 5,
+            "small": 25,
+            "small_business": 25,
+            "mid": 120,
+            "mid-market": 120,
+            "medium": 120,
+            "large": 350,
+            "enterprise": 1200,
+        }
+        if text in common_bands:
+            return common_bands[text]
+
+        if "-" in text:
+            low, _, high = text.partition("-")
+            if low.strip().isdigit() and high.strip().isdigit():
+                return max(1, (int(low.strip()) + int(high.strip())) // 2)
+
+        digits = "".join(ch for ch in text if ch.isdigit())
+        if digits:
+            return max(1, int(digits))
+
+        return default
+
+    @staticmethod
+    def _recency_multiplier(last_seen: Optional[datetime]) -> float:
+        """Boost engagement for recent activity and decay stale engagement."""
+        if not last_seen:
+            return 0.85
+
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        recency_days = max(0.0, (now - last_seen).total_seconds() / 86400)
+
+        if recency_days <= 1:
+            return 1.20
+        if recency_days <= 3:
+            return 1.12
+        if recency_days <= 7:
+            return 1.05
+        if recency_days <= 14:
+            return 0.95
+        if recency_days <= 30:
+            return 0.88
+        return 0.80
+
     async def initialize_tables(self):
         """Create advanced scoring tables"""
         if self._initialized:
@@ -276,6 +343,8 @@ class AdvancedLeadScoringEngine:
         """Calculate behavioral engagement score (0-30 points)"""
 
         # Get engagement history
+        engagement: dict[str, dict[str, Any]] = {}
+        last_seen: Optional[datetime] = None
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -292,6 +361,16 @@ class AdvancedLeadScoringEngine:
                         (lead_id,),
                     )
                     engagement = {row["event_type"]: row for row in cur.fetchall()}
+                    cur.execute(
+                        """
+                        SELECT MAX(COALESCE(completed_at, created_at)) AS last_seen
+                        FROM lead_activities
+                        WHERE lead_id = %s
+                        """,
+                        (lead_id,),
+                    )
+                    last_row = cur.fetchone() or {}
+                    last_seen = last_row.get("last_seen")
                 except Exception:
                     # Backwards-compatible fallback for DBs that still use the legacy table.
                     cur.execute(
@@ -306,17 +385,47 @@ class AdvancedLeadScoringEngine:
                         (lead_id,),
                     )
                     engagement = {row["event_type"]: row for row in cur.fetchall()}
+                    cur.execute(
+                        """
+                        SELECT MAX(timestamp) AS last_seen
+                        FROM lead_engagement_history
+                        WHERE lead_id = %s
+                        """,
+                        (lead_id,),
+                    )
+                    last_row = cur.fetchone() or {}
+                    last_seen = last_row.get("last_seen")
         finally:
             conn.close()
 
+        engagement_payload = lead_data.get("engagement", {})
+        if not isinstance(engagement_payload, dict):
+            engagement_payload = {}
+
         # Email engagement (0-8 points)
-        email_opens = engagement.get('email_open', {}).get('count', 0)
-        email_clicks = engagement.get('email_click', {}).get('count', 0)
-        email_score = min(8, (email_opens * 0.5) + (email_clicks * 1.5))
+        db_email_opens = self._coerce_float(engagement.get("email_open", {}).get("count"), 0.0)
+        db_email_clicks = self._coerce_float(engagement.get("email_click", {}).get("count"), 0.0)
+        hinted_email_opens = self._coerce_float(
+            engagement_payload.get("email_opens_30d", engagement_payload.get("email_opens")),
+            0.0,
+        )
+        hinted_email_clicks = self._coerce_float(
+            engagement_payload.get("email_clicks_30d", engagement_payload.get("email_clicks")),
+            0.0,
+        )
+        email_opens = max(db_email_opens, hinted_email_opens)
+        email_clicks = max(db_email_clicks, hinted_email_clicks)
+        recency_multiplier = self._recency_multiplier(last_seen)
+        email_score = min(8, ((email_opens * 0.5) + (email_clicks * 1.5)) * recency_multiplier)
 
         # Website activity (0-6 points)
-        page_views = engagement.get('page_view', {}).get('count', 0)
-        website_score = min(6, page_views * 0.3)
+        db_page_views = self._coerce_float(engagement.get("page_view", {}).get("count"), 0.0)
+        hinted_page_views = self._coerce_float(
+            engagement_payload.get("page_visits_30d", engagement_payload.get("page_visits")),
+            0.0,
+        )
+        page_views = max(db_page_views, hinted_page_views)
+        website_score = min(6, (page_views * 0.3) * recency_multiplier)
 
         # Content downloads (0-5 points)
         downloads = engagement.get('content_download', {}).get('count', 0)
@@ -345,7 +454,13 @@ class AdvancedLeadScoringEngine:
         company = lead_data.get('company', {})
 
         # Company size fit (0-7 points)
-        employees = company.get('employees', 50)
+        employees = self._normalize_company_size(
+            company.get("employees")
+            or company.get("employee_count")
+            or company.get("company_size")
+            or company.get("size")
+            or lead_data.get("company_size")
+        )
         size_score = 0
         for (low, high), score in self.company_size_scores.items():
             if low <= employees <= high:

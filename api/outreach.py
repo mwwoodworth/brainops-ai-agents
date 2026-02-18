@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from outreach_engine import get_outreach_engine
 from outreach_executor import run_outreach_cycle
@@ -47,6 +47,14 @@ class ReplyLogRequest(BaseModel):
     summary: str
 
 
+class EngagementEventRequest(BaseModel):
+    """Request to track engagement events for A/B and scoring."""
+    event_type: str
+    event_value: float = 1.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    actor: str = "system:outreach_api"
+
+
 @router.get("/stats")
 async def get_outreach_stats() -> dict[str, Any]:
     """
@@ -58,6 +66,21 @@ async def get_outreach_stats() -> dict[str, Any]:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **stats
+    }
+
+
+@router.get("/ab-test/stats")
+async def get_ab_test_stats(
+    days: int = Query(default=30, ge=1, le=180, description="Time window for experiment stats")
+) -> dict[str, Any]:
+    """
+    Get A/B test performance summary for outreach variants.
+    """
+    engine = get_outreach_engine()
+    stats = await engine.get_ab_test_stats(days=days)
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        **stats,
     }
 
 
@@ -226,6 +249,33 @@ async def log_reply(
         "message": message,
         "lead_id": lead_id,
         "new_state": "replied"
+    }
+
+
+@router.post("/leads/{lead_id}/engagement")
+async def track_engagement(
+    lead_id: str,
+    request: EngagementEventRequest,
+) -> dict[str, Any]:
+    """
+    Track an engagement event (open/click/reply/meeting_booked) for a lead.
+    """
+    engine = get_outreach_engine()
+    success, message = await engine.track_engagement_event(
+        lead_id=lead_id,
+        event_type=request.event_type,
+        event_value=request.event_value,
+        metadata=request.metadata,
+        actor=request.actor,
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+
+    return {
+        "success": True,
+        "message": message,
+        "lead_id": lead_id,
+        "event_type": request.event_type,
     }
 
 
