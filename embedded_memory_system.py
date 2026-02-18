@@ -12,7 +12,19 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-import numpy as np
+logger = logging.getLogger(__name__)
+
+try:
+    import numpy as np
+except ImportError as exc:
+    np = None
+    NUMPY_IMPORT_ERROR = exc
+    logger.warning(
+        "NumPy unavailable; embedded memory vector similarity is disabled: %s",
+        exc,
+    )
+else:
+    NUMPY_IMPORT_ERROR = None
 
 from safe_task import create_safe_task
 from utils.embedding_provider import (
@@ -23,9 +35,6 @@ from utils.embedding_provider import (
     get_provider_order,
     iter_providers,
 )
-
-logger = logging.getLogger(__name__)
-
 
 def _env_flag(name: str, default: str = "false") -> bool:
     return (os.getenv(name, default) or "").strip().lower() in {"1", "true", "yes", "on"}
@@ -179,6 +188,8 @@ class EmbeddedMemorySystem:
 
     def _encode_embedding(self, text: str) -> Optional[bytes]:
         """Convert text to embedding vector using the shared embedding provider chain."""
+        if np is None:
+            return None
         try:
             embedding_list = generate_embedding_sync(text, log=logger)
             if not embedding_list:
@@ -189,8 +200,10 @@ class EmbeddedMemorySystem:
             logger.error("Embedding encoding failed: %s", e)
             return None
 
-    def _decode_embedding(self, embedding_bytes: bytes) -> Optional[np.ndarray]:
+    def _decode_embedding(self, embedding_bytes: bytes) -> Optional[Any]:
         """Convert bytes back to numpy array"""
+        if np is None:
+            return None
         try:
             return np.frombuffer(embedding_bytes, dtype=np.float32)
         except Exception as e:
@@ -270,6 +283,8 @@ class EmbeddedMemorySystem:
             return {"status": "skipped", "reason": "ENABLE_EMBEDDED_MEMORY_CONSOLIDATION=false"}
         if not self.sqlite_conn:
             return {"status": "error", "error": "sqlite_unavailable"}
+        if np is None:
+            return {"status": "skipped", "reason": "numpy_unavailable"}
 
         cursor = self.sqlite_conn.cursor()
         cursor.execute(
@@ -521,6 +536,8 @@ class EmbeddedMemorySystem:
 
         if not query_embedding or not rows:
             # Fallback to simple query without vector similarity
+            return [dict(row) for row in rows[:limit]]
+        if np is None:
             return [dict(row) for row in rows[:limit]]
 
         # Calculate semantic similarity
