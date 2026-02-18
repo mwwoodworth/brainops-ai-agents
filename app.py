@@ -1277,6 +1277,7 @@ async def lifespan(app: FastAPI):
     app.state.reconciler = None
     app.state.memory = None
     app.state.embedded_memory = None
+    app.state.embedded_memory_error = None
     app.state.nerve_center = None
     app.state.nerve_center_error = None
     app.state.operational_monitor = None
@@ -1395,8 +1396,10 @@ async def lifespan(app: FastAPI):
             try:
                 embedded_memory = await get_embedded_memory()
                 app.state.embedded_memory = embedded_memory
+                app.state.embedded_memory_error = None
                 logger.info("⚡ Embedded Memory System initialized")
             except Exception as e:
+                app.state.embedded_memory_error = str(e)
                 logger.error(f"❌ Embedded Memory initialization failed: {e}")
 
         # Warm up Unified Brain for fast /brain/* endpoint responses
@@ -3218,11 +3221,16 @@ async def health_check(
         active_systems = _collect_active_systems()
 
         embedded_memory_stats = None
+        embedded_memory_error = getattr(app.state, "embedded_memory_error", None)
         if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None) is None:
             try:
                 app.state.embedded_memory = await asyncio.wait_for(get_embedded_memory(), timeout=5.0)
+                app.state.embedded_memory_error = None
+                embedded_memory_error = None
                 logger.info("✅ Embedded Memory System lazily initialized from /health")
             except Exception as exc:
+                embedded_memory_error = str(exc)
+                app.state.embedded_memory_error = embedded_memory_error
                 logger.warning("Embedded memory lazy init failed during /health: %s", exc)
 
         if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None):
@@ -3244,6 +3252,7 @@ async def health_check(
             and hasattr(app.state, "embedded_memory")
             and app.state.embedded_memory is not None,
             "embedded_memory_stats": embedded_memory_stats,
+            "embedded_memory_error": embedded_memory_error,
             "capabilities": {
                 # Phase 1
                 "aurea_orchestrator": AUREA_AVAILABLE,
