@@ -147,7 +147,24 @@ class EmbeddedMemorySystem:
             """
         )
 
-        # Learning from mistakes
+        # Learning from mistakes (runtime code reads/writes this table)
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS ai_learning_from_mistakes (
+                id TEXT PRIMARY KEY,
+                agent_id TEXT,
+                task_id TEXT,
+                mistake_description TEXT NOT NULL,
+                root_cause TEXT,
+                lesson_learned TEXT,
+                impact_level TEXT DEFAULT 'medium',
+                created_at TEXT,
+                synced_at TEXT
+            )
+            """
+        )
+
+        # Backward-compatible legacy learning events table (older code paths)
         cursor.execute(
             """
             CREATE TABLE IF NOT EXISTS ai_learning_events (
@@ -193,6 +210,14 @@ class EmbeddedMemorySystem:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_ai_autonomous_tasks_synced "
             "ON ai_autonomous_tasks(synced_at)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_learning_from_mistakes_created "
+            "ON ai_learning_from_mistakes(created_at DESC)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ai_learning_from_mistakes_synced "
+            "ON ai_learning_from_mistakes(synced_at)"
         )
 
         self.sqlite_conn.commit()
