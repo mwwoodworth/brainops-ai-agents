@@ -1816,80 +1816,88 @@ class AUREA:
         """Apply learning insights to improve performance - ALWAYS stores learning data"""
         try:
             with _get_pooled_connection() as conn:
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor()
+                try:
+                    self._apply_tenant_context(cur)
 
-                # ALWAYS store the learning insight to the database
-                adjustment = "none"
-                if (
-                    insight["type"] == "performance"
-                    and insight["data"].get("success_rate", 1.0) < 0.5
-                ):
-                    adjustment = "reduced_confidence_threshold"
-                elif insight["type"] == "execution_cycle":
-                    adjustment = "cycle_recorded"
+                    # ALWAYS store the learning insight to the database
+                    adjustment = "none"
+                    if (
+                        insight["type"] == "performance"
+                        and insight["data"].get("success_rate", 1.0) < 0.5
+                    ):
+                        adjustment = "reduced_confidence_threshold"
+                    elif insight["type"] == "execution_cycle":
+                        adjustment = "cycle_recorded"
 
-                cur.execute(
-                    """
-                    INSERT INTO ai_learning_insights
-                    (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                """,
-                    (
-                        self.tenant_id,
-                        insight["type"],
-                        "aurea_ooda",  # category
-                        insight.get("insight", f"Cycle insight: {insight['type']}"),
-                        insight.get("data", {}).get("success_rate", 0.8),  # confidence
-                        0.5,  # impact_score
-                        json.dumps([adjustment]),  # recommendations as array
-                        adjustment != "none",  # applied boolean
-                        json.dumps(insight.get("data", {})),  # metadata
-                    ),
-                )
-                conn.commit()
-                logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
-
-                if (
-                    insight["type"] == "performance"
-                    and insight["data"].get("success_rate", 1.0) < 0.5
-                ):
-                    # Adjust agent confidence thresholds for poor performers
-                    if "agent_name" in insight["data"]:
-                        cur.execute(
-                            """
-                            UPDATE ai_agents
-                            SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
-                                updated_at = NOW()
-                            WHERE name = %s AND tenant_id = %s
-                        """,
-                            (insight["data"]["agent_name"], self.tenant_id),
-                        )
-
-                    logger.info(
-                        "📚 Learning applied: Adjusted confidence thresholds for low-performing agents"
-                    )
-
-                elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
-                    # Store high-confidence patterns for future decision making
                     cur.execute(
                         """
-                        INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
-                        VALUES (%s, %s, %s, %s, NOW())
-                        ON CONFLICT DO NOTHING
+                        INSERT INTO ai_learning_insights
+                        (tenant_id, insight_type, category, insight, confidence, impact_score, recommendations, applied, metadata, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     """,
                         (
                             self.tenant_id,
-                            insight.get("pattern_type", "general"),
-                            json.dumps(insight["data"]),
-                            insight.get("pattern_confidence", 0.8),
+                            insight["type"],
+                            "aurea_ooda",  # category
+                            insight.get("insight", f"Cycle insight: {insight['type']}"),
+                            insight.get("data", {}).get("success_rate", 0.8),  # confidence
+                            0.5,  # impact_score
+                            json.dumps([adjustment]),  # recommendations as array
+                            adjustment != "none",  # applied boolean
+                            json.dumps(insight.get("data", {})),  # metadata
                         ),
                     )
-                    logger.info(
-                        f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence"
-                    )
+                    logger.info(f"📚 Learning recorded: {insight['type']} - {adjustment}")
 
-                conn.commit()
-                cur.close()
+                    if (
+                        insight["type"] == "performance"
+                        and insight["data"].get("success_rate", 1.0) < 0.5
+                    ):
+                        # Adjust agent confidence thresholds for poor performers
+                        if "agent_name" in insight["data"]:
+                            cur.execute(
+                                """
+                                UPDATE ai_agents
+                                SET config = config || '{"confidence_threshold": 0.7}'::jsonb,
+                                    updated_at = NOW()
+                                WHERE name = %s AND tenant_id = %s
+                            """,
+                                (insight["data"]["agent_name"], self.tenant_id),
+                            )
+
+                        logger.info(
+                            "📚 Learning applied: Adjusted confidence thresholds for low-performing agents"
+                        )
+
+                    elif insight["type"] == "pattern" and insight.get("pattern_confidence", 0) > 0.8:
+                        # Store high-confidence patterns for future decision making
+                        cur.execute(
+                            """
+                            INSERT INTO ai_decision_patterns (tenant_id, pattern_type, pattern_data, confidence, created_at)
+                            VALUES (%s, %s, %s, %s, NOW())
+                            ON CONFLICT DO NOTHING
+                        """,
+                            (
+                                self.tenant_id,
+                                insight.get("pattern_type", "general"),
+                                json.dumps(insight["data"]),
+                                insight.get("pattern_confidence", 0.8),
+                            ),
+                        )
+                        logger.info(
+                            f"📚 Learning applied: Stored new decision pattern with {insight.get('pattern_confidence', 0.8):.0%} confidence"
+                        )
+
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
 
         except Exception as e:
             logger.warning(f"Could not apply learning insight: {e}")
@@ -2850,30 +2858,39 @@ class AUREA:
         """Store new goal in database - uses shared pool"""
         try:
             with _get_pooled_connection() as conn:
+                prev_autocommit = conn.autocommit
+                conn.autocommit = False
                 cur = conn.cursor()
-                cur.execute(
-                    """
-                    INSERT INTO aurea_autonomous_goals
-                    (id, goal_type, description, target_metric, current_value, target_value,
-                     deadline, priority, status, progress, tenant_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                """,
-                    (
-                        goal.id,
-                        goal.goal_type,
-                        goal.description,
-                        goal.target_metric,
-                        goal.current_value,
-                        goal.target_value,
-                        goal.deadline,
-                        goal.priority,
-                        goal.status,
-                        goal.progress,
-                        self.tenant_id,
-                    ),
-                )
-                conn.commit()
-                cur.close()
+                try:
+                    self._apply_tenant_context(cur)
+                    cur.execute(
+                        """
+                        INSERT INTO aurea_autonomous_goals
+                        (id, goal_type, description, target_metric, current_value, target_value,
+                         deadline, priority, status, progress, tenant_id)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    """,
+                        (
+                            goal.id,
+                            goal.goal_type,
+                            goal.description,
+                            goal.target_metric,
+                            goal.current_value,
+                            goal.target_value,
+                            goal.deadline,
+                            goal.priority,
+                            goal.status,
+                            goal.progress,
+                            self.tenant_id,
+                        ),
+                    )
+                    conn.commit()
+                except Exception:
+                    conn.rollback()
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = prev_autocommit
             logger.info(f"🎯 New autonomous goal set: {goal.description}")
         except Exception as e:
             logger.error(f"Goal storage error: {e}")
