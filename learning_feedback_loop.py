@@ -13,6 +13,7 @@ The system finally ACTS on the insights it generates.
 
 import json
 import logging
+import os
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -645,6 +646,7 @@ class LearningFeedbackLoop:
         results = {
             "processed": 0,
             "applied": 0,
+            "queued": 0,
             "failed": 0,
             "details": []
         }
@@ -652,7 +654,7 @@ class LearningFeedbackLoop:
         try:
             # Get approved proposals
             approved = await pool.fetch("""
-                SELECT id, title, improvement_type, implementation_steps, risk_level
+                SELECT id, title, improvement_type, implementation_steps, risk_level, tenant_id
                 FROM ai_improvement_proposals
                 WHERE status = 'approved'
                 ORDER BY priority ASC, created_at ASC
@@ -672,27 +674,45 @@ class LearningFeedbackLoop:
                     """, row['id'])
 
                     # Apply the improvement based on type
-                    success = await self._apply_improvement(
+                    outcome = await self._apply_improvement(
                         proposal_id=proposal_id,
                         improvement_type=row['improvement_type'],
                         steps=row['implementation_steps'],
+                        risk_level=row['risk_level'],
+                        tenant_id=str(row["tenant_id"] or ""),
                         pool=pool
                     )
 
-                    if success:
+                    status = (outcome or {}).get("status")
+                    if status == "applied":
                         await pool.execute("""
                             UPDATE ai_improvement_proposals
                             SET status = 'completed',
                                 completed_at = NOW(),
-                                implementation_notes = 'Applied by learning feedback loop'
+                                implementation_notes = $2
                             WHERE id = $1
-                        """, row['id'])
+                        """, row['id'], (outcome or {}).get("notes") or 'Applied by learning feedback loop')
 
                         results["applied"] += 1
                         results["details"].append({
                             "id": proposal_id,
                             "title": row['title'],
                             "status": "applied"
+                        })
+                    elif status == "queued":
+                        await pool.execute("""
+                            UPDATE ai_improvement_proposals
+                            SET status = 'queued_for_self_build',
+                                implementation_notes = $2
+                            WHERE id = $1
+                        """, row['id'], (outcome or {}).get("notes") or "Queued for SelfBuilder")
+
+                        results["queued"] += 1
+                        results["details"].append({
+                            "id": proposal_id,
+                            "title": row['title'],
+                            "status": "queued",
+                            "task_id": (outcome or {}).get("task_id"),
                         })
                     else:
                         await pool.execute("""
@@ -723,8 +743,10 @@ class LearningFeedbackLoop:
         proposal_id: str,
         improvement_type: str,
         steps: Any,
+        risk_level: Any,
+        tenant_id: str,
         pool
-    ) -> bool:
+    ) -> dict[str, Any]:
         """
         Apply a specific improvement.
 
@@ -733,7 +755,7 @@ class LearningFeedbackLoop:
         - Creating monitoring entries
         - Marking insights as processed
 
-        Complex improvements are logged for manual implementation.
+        Complex improvements are queued for the SelfBuilder to implement as a PR.
         """
         try:
             if improvement_type == ImprovementType.THRESHOLD_ADJUST.value:
@@ -746,7 +768,7 @@ class LearningFeedbackLoop:
                         $1, 0.9, 0.6, true
                     )
                 """, f"Applied threshold adjustment from proposal {proposal_id}")
-                return True
+                return {"status": "applied", "notes": "Applied threshold adjustment (logged in insights)"}
 
             elif improvement_type == ImprovementType.MONITORING.value:
                 # Add monitoring insight
@@ -758,7 +780,7 @@ class LearningFeedbackLoop:
                         $1, 0.9, 0.5, true
                     )
                 """, f"Added monitoring per proposal {proposal_id}")
-                return True
+                return {"status": "applied", "notes": "Added monitoring (logged in insights)"}
 
             elif improvement_type == ImprovementType.WORKFLOW_CHANGE.value:
                 # Mark related insights as processed
@@ -770,16 +792,75 @@ class LearningFeedbackLoop:
                     AND created_at > NOW() - INTERVAL '7 days'
                     LIMIT 100
                 """ % proposal_id)
-                return True
+                return {"status": "applied", "notes": "Processed workflow insights (marked applied)"}
 
             else:
-                # Complex improvements need manual implementation
-                logger.info(f"Improvement type {improvement_type} requires manual implementation")
-                return False
+                task_id = await self._queue_self_build_task(
+                    pool=pool,
+                    tenant_id=tenant_id,
+                    proposal_id=proposal_id,
+                    improvement_type=improvement_type,
+                    risk_level=str(risk_level or ""),
+                    steps=steps,
+                )
+                if task_id:
+                    return {
+                        "status": "queued",
+                        "task_id": task_id,
+                        "notes": f"Queued for SelfBuilder PR (task_id={task_id})",
+                    }
+                logger.info("Improvement type %s queued request failed; needs manual implementation", improvement_type)
+                return {"status": "failed", "notes": "Queue failed; needs manual implementation"}
 
         except Exception as e:
             logger.error(f"Failed to apply improvement: {e}")
-            return False
+            return {"status": "failed", "notes": str(e)}
+
+    async def _queue_self_build_task(
+        self,
+        *,
+        pool: Any,
+        tenant_id: str,
+        proposal_id: str,
+        improvement_type: str,
+        risk_level: str,
+        steps: Any,
+    ) -> Optional[str]:
+        """Queue a code-change task for the SelfBuilder via ai_task_queue."""
+        enabled = os.getenv("ENABLE_SELF_CODING_ENGINE", "false").strip().lower() in ("true", "1", "yes")
+        if not enabled:
+            return None
+
+        # Priority: ai_task_queue processes higher numbers first.
+        risk = (risk_level or "").strip().lower()
+        priority_map = {"critical": 95, "high": 85, "medium": 70, "low": 50}
+        priority = priority_map.get(risk, 70)
+
+        payload = {
+            "proposal_id": proposal_id,
+            "action": "implement_proposal",
+            "improvement_type": improvement_type,
+            "risk_level": risk,
+            "steps": steps,
+            # Ask AgentExecutor to enrich this with graph context when executed.
+            "use_graph_context": True,
+        }
+
+        try:
+            row = await pool.fetchrow(
+                """
+                INSERT INTO ai_task_queue (tenant_id, task_type, payload, priority, status, created_at, updated_at)
+                VALUES ($1, 'self_build', $2::jsonb, $3, 'pending', NOW(), NOW())
+                RETURNING id
+                """,
+                tenant_id or None,
+                json.dumps(payload, default=str),
+                priority,
+            )
+            return str(row["id"]) if row and row["id"] else None
+        except Exception as exc:
+            logger.error("Failed to queue self_build task for proposal %s: %s", proposal_id, exc)
+            return None
 
     async def run_feedback_loop(self) -> dict[str, Any]:
         """
@@ -801,6 +882,7 @@ class LearningFeedbackLoop:
             "proposals_saved": 0,
             "auto_approved": 0,
             "improvements_applied": 0,
+            "improvements_queued": 0,
             "errors": []
         }
 
@@ -829,6 +911,7 @@ class LearningFeedbackLoop:
             # Step 5: Apply approved improvements
             application_results = await self.apply_approved_proposals()
             results["improvements_applied"] = application_results["applied"]
+            results["improvements_queued"] = application_results.get("queued", 0)
 
             # Record this cycle
             await self._record_cycle(results)
@@ -846,7 +929,8 @@ class LearningFeedbackLoop:
             f"Feedback loop completed: {results['patterns_found']} patterns -> "
             f"{results['proposals_generated']} proposals -> "
             f"{results['auto_approved']} auto-approved -> "
-            f"{results['improvements_applied']} applied"
+            f"{results['improvements_applied']} applied -> "
+            f"{results.get('improvements_queued', 0)} queued"
         )
 
         return results
@@ -866,7 +950,8 @@ class LearningFeedbackLoop:
             """,
                 f"Feedback loop: {results['patterns_found']} patterns, "
                 f"{results['proposals_generated']} proposals, "
-                f"{results['improvements_applied']} applied",
+                f"{results['improvements_applied']} applied, "
+                f"{results.get('improvements_queued', 0)} queued",
                 json.dumps(results)
             )
         except Exception as e:

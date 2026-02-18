@@ -123,6 +123,40 @@ class TestTaskQueueConsumers:
         assert "pg_try_advisory_lock" in content, "Advisory lock not in AI task queue"
         assert "ADVISORY_LOCK_KEY" in content, "Advisory lock key not defined"
 
+    def test_ai_task_queue_supports_self_build(self):
+        """Verify self-build tasks can be dispatched from ai_task_queue."""
+        with open("ai_task_queue_consumer.py", "r") as f:
+            content = f.read()
+
+        assert "task_type == \"self_build\"" in content, "self_build task type not supported"
+        assert "def _handle_self_build" in content, "_handle_self_build handler not implemented"
+        assert "AI_TASK_QUEUE_SELF_BUILD_TIMEOUT_SECONDS" in content, "Self-build timeout env var missing"
+
+
+class TestSelfCodingEngine:
+    """Test Phase 1: Self-Coding Engine wiring (guardrails + queue integration)."""
+
+    def test_self_coding_engine_module_exists(self):
+        """Verify self_coding_engine.py is present."""
+        assert os.path.exists("self_coding_engine.py"), "self_coding_engine.py missing"
+
+    def test_learning_feedback_loop_queues_self_build_tasks(self):
+        """Verify LearningFeedbackLoop queues complex improvements for SelfBuilder."""
+        with open("learning_feedback_loop.py", "r") as f:
+            content = f.read()
+
+        assert "INSERT INTO ai_task_queue" in content, "Learning feedback loop not queuing tasks"
+        assert "'self_build'" in content or "\"self_build\"" in content, "self_build task_type not referenced"
+
+    def test_self_builder_supports_implement_proposal(self):
+        """Verify SelfBuilder can implement an improvement proposal."""
+        with open("agent_executor.py", "r") as f:
+            content = f.read()
+
+        assert "class SelfBuildingAgent" in content, "SelfBuildingAgent missing"
+        assert "implement_improvement_proposal" in content, "SelfBuilder implement action missing"
+        assert "implement_proposal_with_pr" in content, "SelfBuilder not wired to self-coding engine"
+
 
 class TestIntelligentOrchestrator:
     """Test intelligent task orchestrator integration"""

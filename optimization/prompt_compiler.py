@@ -15,8 +15,10 @@ The compiler returns a compiled DSPy program when possible, otherwise `None`.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -56,6 +58,9 @@ class RevenuePromptCompiler:
 
     def enabled(self) -> bool:
         return self._dspy is not None
+
+    def compiled(self) -> bool:
+        return bool(self._compiled_program)
 
     def compile(self, training_samples: list[dict[str, Any]]) -> Any | None:
         """
@@ -155,32 +160,76 @@ class RevenuePromptCompiler:
             leads = str(sample.get("leads") or "").strip()
             revenue_metrics = str(sample.get("revenue_metrics") or "").strip()
             email = str(sample.get("email") or "").strip()
+            optimized_email = str(sample.get("optimized_email") or email or "").strip()
             if not (leads and email):
                 continue
 
-            # We generally don't have ground-truth optimized emails yet.
-            # Use the draft as a placeholder label so DSPy can still bootstrap.
             example = dspy.Example(  # type: ignore[attr-defined]
                 leads=leads,
                 revenue_metrics=revenue_metrics,
                 email=email,
-                optimized_email=email,
+                optimized_email=optimized_email,
                 revenue_generated=float(sample.get("revenue_generated") or 0),
+                reward_score=float(sample.get("reward_score") or 0),
+                outcome=str(sample.get("outcome") or ""),
             ).with_inputs("leads", "revenue_metrics", "email")
             trainset.append(example)
         return trainset
 
     @staticmethod
-    def _revenue_metric(example: Any, pred: Any, trace: Any = None) -> float:
-        """
-        Best-effort metric placeholder.
+    def _normalize_text(text: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (text or "").strip().lower())
+        # Remove non-content wrappers that can vary without meaning.
+        cleaned = cleaned.replace("\r", "")
+        return cleaned
 
-        When real outcomes are available, replace with a metric that correlates
-        generated email with conversions/revenue (e.g., from `revenue_leads`).
+    @classmethod
+    def _text_similarity(cls, a: str, b: str) -> float:
+        a_norm = cls._normalize_text(a)
+        b_norm = cls._normalize_text(b)
+        if not a_norm or not b_norm:
+            return 0.0
+        # Token overlap gives a stable signal even when formatting differs.
+        a_tokens = set(re.findall(r"[a-z0-9']{2,}", a_norm))
+        b_tokens = set(re.findall(r"[a-z0-9']{2,}", b_norm))
+        if a_tokens and b_tokens:
+            overlap = len(a_tokens & b_tokens) / max(1, len(a_tokens | b_tokens))
+        else:
+            overlap = 0.0
+        ratio = difflib.SequenceMatcher(a=a_norm, b=b_norm).ratio()
+        return max(0.0, min(1.0, 0.6 * ratio + 0.4 * overlap))
+
+    @classmethod
+    def _revenue_metric(cls, example: Any, pred: Any, trace: Any = None) -> float:
+        """
+        Conversion-weighted imitation metric.
+
+        DSPy teleprompting needs a metric that depends on the prediction. We don't
+        have counterfactual "would this email have closed the deal?" data yet, so we
+        use a pragmatic proxy:
+        - Similarity(pred.optimized_email, example.optimized_email)
+        - Weighted by example.reward_score (0..1) and revenue_generated
         """
         try:
+            target = str(getattr(example, "optimized_email", "") or "")
+            predicted = str(getattr(pred, "optimized_email", "") or "")
+            similarity = cls._text_similarity(target, predicted)
+
+            reward = float(getattr(example, "reward_score", 0) or 0)
+            if reward <= 0:
+                # Neutral sample: only enforce non-degenerate output.
+                return max(0.0, min(0.2, similarity))
+
+            # Ensure reward is in [0, 1].
+            reward = max(0.0, min(1.0, reward))
+
+            # Soft-scale revenue so large deals matter more without dominating.
             value = float(getattr(example, "revenue_generated", 0) or 0)
-            # Normalize to [0, 1] with a soft cap.
-            return max(0.0, min(1.0, value / 1000.0))
+            cap = float(os.getenv("DSPY_REWARD_CAP_AMOUNT") or 5000.0)
+            cap = max(1.0, cap)
+            value_scale = max(0.0, min(1.0, (value / cap)))
+
+            score = similarity * (0.65 * reward + 0.35 * value_scale)
+            return max(0.0, min(1.0, score))
         except Exception:
             return 0.0

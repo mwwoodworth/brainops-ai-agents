@@ -237,6 +237,28 @@ class PipelineStateMachine:
 
             logger.info(f"Lead {lead_id[:8]}... transitioned: {current_state} -> {to_state.value} by {actor}")
 
+            # Phase 2: Revenue reinforcement
+            # Best-effort: when a lead reaches late-stage conversion states, ask the optimizer to recompile.
+            try:
+                if to_state in {PipelineState.WON_INVOICE_PENDING, PipelineState.INVOICED, PipelineState.PAID}:
+                    from optimization.revenue_prompt_compile_queue import enqueue_revenue_prompt_compile_task
+
+                    tenant_hint = None
+                    if isinstance(metadata, dict):
+                        tenant_hint = metadata.get("tenant_id")
+
+                    priority = 95 if to_state == PipelineState.PAID else 85
+                    await enqueue_revenue_prompt_compile_task(
+                        pool=pool,
+                        tenant_id=str(tenant_hint) if tenant_hint else None,
+                        lead_id=str(lead_id),
+                        reason=f"pipeline_state_transition:{to_state.value}",
+                        priority=priority,
+                        force=True,
+                    )
+            except Exception as exc:
+                logger.debug("Revenue prompt compile enqueue skipped: %s", exc)
+
             transition = StateTransition(
                 id=transition_id,
                 lead_id=lead_id,

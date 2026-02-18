@@ -48,9 +48,13 @@ class EmbeddedMemorySystem:
         self.embedding_model = None
         self.sync_task = None
         self.last_sync = None
+        self.initialized = False
 
     async def initialize(self):
         """Initialize local SQLite and master Postgres connections"""
+        if self.initialized:
+            return
+
         logger.info("🧠 Initializing Embedded Memory System...")
 
         # 1. Setup local SQLite
@@ -68,6 +72,7 @@ class EmbeddedMemorySystem:
         # 5. Start background sync task (includes retry logic)
         self.sync_task = create_safe_task(self._background_sync())
 
+        self.initialized = True
         logger.info("✅ Embedded Memory System initialized")
 
     async def _setup_local_db(self):
@@ -736,6 +741,7 @@ class EmbeddedMemorySystem:
         # CRITICAL: Do NOT close self.pg_pool - it's a SHARED pool managed globally
         # Closing it here would break other modules using the same pool
         # The shared pool is managed by database/async_connection.py
+        self.initialized = False
 
 
 # Global instance
@@ -745,8 +751,22 @@ async def get_embedded_memory() -> EmbeddedMemorySystem:
     """Get or create global embedded memory instance"""
     global _embedded_memory
 
-    if _embedded_memory is None:
-        _embedded_memory = EmbeddedMemorySystem()
-        await _embedded_memory.initialize()
+    if _embedded_memory is None or not getattr(_embedded_memory, "initialized", False):
+        if _embedded_memory is not None:
+            try:
+                await _embedded_memory.close()
+            except Exception:
+                pass
+        candidate = EmbeddedMemorySystem()
+        try:
+            await candidate.initialize()
+            _embedded_memory = candidate
+        except Exception:
+            try:
+                await candidate.close()
+            except Exception:
+                pass
+            _embedded_memory = None
+            raise
 
     return _embedded_memory

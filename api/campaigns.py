@@ -259,6 +259,50 @@ async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, A
     queued = 0
     for template in campaign.templates:
         subject, body_html = personalize_template(template, lead_data, campaign)
+        optimizer_meta: dict[str, Any] = {}
+        try:
+            from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+            optimizer = get_revenue_prompt_optimizer()
+            leads_context = json.dumps(
+                {
+                    "lead_id": lead_id,
+                    "company_name": lead_data.get("company_name"),
+                    "contact_name": lead_data.get("contact_name"),
+                    "email": lead_data.get("email"),
+                    "industry": lead_data.get("industry"),
+                    "source": lead_data.get("source"),
+                    "metadata": lead_data.get("metadata") or {},
+                },
+                default=str,
+            )
+            revenue_metrics = json.dumps(
+                {
+                    "pipeline_stage": lead_data.get("stage"),
+                    "campaign_id": campaign_id,
+                    "template_step": template.step,
+                    "delay_days": template.delay_days,
+                    "source": "campaign_outreach",
+                },
+                default=str,
+            )
+            opt = await optimizer.optimize(
+                leads=leads_context,
+                revenue_metrics=revenue_metrics,
+                subject=subject,
+                body=body_html,
+                pool=pool,
+            )
+            subject = opt.subject
+            body_html = opt.body
+            optimizer_meta = {
+                "used_optimizer": opt.used_optimizer,
+                "compiled": opt.compiled,
+                "compiled_at": opt.compiled_at,
+            }
+        except Exception as exc:
+            logger.debug("DSPy revenue optimizer unavailable: %s", exc)
+
         # Schedule at 9 AM Mountain Time (UTC-7)
         send_date = now + timedelta(days=template.delay_days)
         send_at = send_date.replace(hour=16, minute=0, second=0, microsecond=0)  # 16:00 UTC = 9 AM MT
@@ -268,6 +312,7 @@ async def enroll_lead_in_outreach(campaign_id: str, lead_id: str) -> dict[str, A
             "template_step": template.step,
             "lead_id": lead_id,
             "source": "campaign_outreach",
+            "prompt_optimizer": optimizer_meta,
         })
 
         await pool.execute("""
@@ -352,6 +397,50 @@ async def batch_enroll_outreach(
             now = datetime.now(timezone.utc)
             for template in campaign.templates:
                 subject, body_html = personalize_template(template, lead_data, campaign)
+                optimizer_meta: dict[str, Any] = {}
+                try:
+                    from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+                    optimizer = get_revenue_prompt_optimizer()
+                    leads_context = json.dumps(
+                        {
+                            "lead_id": lead_id,
+                            "company_name": lead_data.get("company_name"),
+                            "contact_name": lead_data.get("contact_name"),
+                            "email": lead_data.get("email"),
+                            "industry": lead_data.get("industry"),
+                            "source": lead_data.get("source"),
+                            "metadata": lead_data.get("metadata") or {},
+                        },
+                        default=str,
+                    )
+                    revenue_metrics = json.dumps(
+                        {
+                            "pipeline_stage": lead_data.get("stage"),
+                            "campaign_id": campaign_id,
+                            "template_step": template.step,
+                            "delay_days": template.delay_days,
+                            "source": "campaign_outreach",
+                        },
+                        default=str,
+                    )
+                    opt = await optimizer.optimize(
+                        leads=leads_context,
+                        revenue_metrics=revenue_metrics,
+                        subject=subject,
+                        body=body_html,
+                        pool=pool,
+                    )
+                    subject = opt.subject
+                    body_html = opt.body
+                    optimizer_meta = {
+                        "used_optimizer": opt.used_optimizer,
+                        "compiled": opt.compiled,
+                        "compiled_at": opt.compiled_at,
+                    }
+                except Exception as exc:
+                    logger.debug("DSPy revenue optimizer unavailable: %s", exc)
+
                 send_date = now + timedelta(days=template.delay_days)
                 send_at = send_date.replace(hour=16, minute=0, second=0, microsecond=0)
 
@@ -360,6 +449,7 @@ async def batch_enroll_outreach(
                     "template_step": template.step,
                     "lead_id": lead_id,
                     "source": "campaign_outreach",
+                    "prompt_optimizer": optimizer_meta,
                 })
 
                 await pool.execute("""
@@ -423,24 +513,75 @@ async def log_lead_reply(campaign_id: str, lead_id: str, payload: LeadReplyInput
 
     now = datetime.now(timezone.utc)
 
-    # Update lead stage to replied
-    await pool.execute(
-        "UPDATE revenue_leads SET stage = 'replied', status = 'replied', updated_at = $1 WHERE id = $2",
-        now, uuid.UUID(lead_id),
-    )
+    # Update lead state via ledger-backed state machine (best-effort).
+    transitioned = False
+    try:
+        from pipeline_state_machine import get_state_machine, PipelineState
+
+        sm = get_state_machine()
+        ok, _msg, _transition = await sm.transition(
+            lead_id,
+            PipelineState.REPLIED,
+            trigger="reply_received",
+            actor="human:campaigns_api",
+            metadata={
+                "campaign_id": campaign_id,
+                "summary": payload.summary,
+                "reply_text": payload.reply_text,
+            },
+            force=True,  # reply implies outreach happened even if earlier states weren't logged
+        )
+        transitioned = bool(ok)
+    except Exception as exc:
+        logger.debug("State machine transition skipped for reply_received: %s", exc)
+
+    # Keep status denormalized for backwards compatibility. If transition failed, fall back to stage update.
+    if transitioned:
+        await pool.execute(
+            "UPDATE revenue_leads SET status = 'replied', updated_at = $1 WHERE id = $2",
+            now,
+            uuid.UUID(lead_id),
+        )
+    else:
+        await pool.execute(
+            "UPDATE revenue_leads SET stage = 'replied', status = 'replied', updated_at = $1 WHERE id = $2",
+            now,
+            uuid.UUID(lead_id),
+        )
 
     # Log engagement
     try:
-        await pool.execute("""
-            INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
-            VALUES ($1, 'reply_received', $2, 'email', $3)
-        """,
+        await pool.execute(
+            """
+            INSERT INTO lead_activities (
+                id, lead_id, activity_type, subject, description,
+                outcome, completed_at, created_at, created_by, event_type
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+            """,
+            uuid.uuid4(),
             uuid.UUID(lead_id),
-            json.dumps({"summary": payload.summary, "reply_text": payload.reply_text}),
+            "email",
+            "Reply received",
+            json.dumps({"summary": payload.summary, "reply_text": payload.reply_text}, default=str),
+            "received",
             now,
+            "human:campaigns_api",
+            "reply_received",
         )
     except Exception:
-        pass  # engagement history table may not exist
+        # Fallback: engagement history table may not exist in all DBs
+        try:
+            await pool.execute(
+                """
+                INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
+                VALUES ($1, 'reply_received', $2, 'email', $3)
+                """,
+                uuid.UUID(lead_id),
+                json.dumps({"summary": payload.summary, "reply_text": payload.reply_text}),
+                now,
+            )
+        except Exception:
+            pass
 
     # Immediate priority notification to partner
     await notify_lead_to_partner(lead_data, campaign, event_type="reply_received")

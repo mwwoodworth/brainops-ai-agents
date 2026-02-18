@@ -353,15 +353,33 @@ class OutreachEngine:
                 WHERE id = $3
             """, json.dumps(new_metadata), datetime.now(timezone.utc), lead["id"])
 
-            # Record in engagement history
-            await pool.execute("""
-                INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
-                VALUES ($1, 'enriched', $2, 'system', $3)
-            """,
-                lead["id"],
-                json.dumps({"source": "internal", "fields_enriched": ["decision_maker", "company_size", "region", "pain_points"]}),
-                datetime.now(timezone.utc)
-            )
+            # Record engagement in lead_activities (lead_engagement_history isn't present in all DBs)
+            try:
+                await pool.execute(
+                    """
+                    INSERT INTO lead_activities (
+                        id, lead_id, activity_type, subject, description,
+                        outcome, completed_at, created_at, created_by, event_type
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+                    """,
+                    uuid.uuid4(),
+                    lead["id"],
+                    "system",
+                    "Lead enriched",
+                    json.dumps(
+                        {
+                            "source": "internal",
+                            "fields_enriched": ["decision_maker", "company_size", "region", "pain_points"],
+                        },
+                        default=str,
+                    ),
+                    "completed",
+                    datetime.now(timezone.utc),
+                    "system:outreach_engine",
+                    "enriched",
+                )
+            except Exception as act_err:
+                logger.debug("Lead activity logging skipped for enriched: %s", act_err)
 
             # Update state machine
             from pipeline_state_machine import get_state_machine, PipelineState
@@ -418,10 +436,54 @@ class OutreachEngine:
         if campaign_id:
             try:
                 from campaign_manager import get_campaign, personalize_template as cm_personalize
+
                 campaign = get_campaign(campaign_id)
                 if campaign and sequence_step <= len(campaign.templates):
                     template = campaign.templates[sequence_step - 1]
                     subject, body = cm_personalize(template, dict(lead), campaign)
+
+                    optimizer_meta: dict[str, Any] = {}
+                    try:
+                        from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+                        optimizer = get_revenue_prompt_optimizer()
+                        leads_context = json.dumps(
+                            {
+                                "lead_id": str(lead["id"]),
+                                "company_name": lead.get("company_name"),
+                                "contact_name": lead.get("contact_name"),
+                                "email": lead.get("email"),
+                                "industry": lead.get("industry"),
+                                "source": lead.get("source"),
+                                "metadata": metadata,
+                            },
+                            default=str,
+                        )
+                        revenue_metrics = json.dumps(
+                            {
+                                "pipeline_stage": lead.get("stage"),
+                                "sequence_step": sequence_step,
+                                "campaign_id": str(campaign_id),
+                                "template_name": getattr(template, "name", None),
+                            },
+                            default=str,
+                        )
+                        opt = await optimizer.optimize(
+                            leads=leads_context,
+                            revenue_metrics=revenue_metrics,
+                            subject=subject,
+                            body=body,
+                            pool=pool,
+                        )
+                        subject = opt.subject
+                        body = opt.body
+                        optimizer_meta = {
+                            "used_optimizer": opt.used_optimizer,
+                            "compiled": opt.compiled,
+                            "compiled_at": opt.compiled_at,
+                        }
+                    except Exception as exc:
+                        logger.debug("DSPy revenue optimizer unavailable: %s", exc)
 
                     # Create draft
                     draft_id = str(uuid.uuid4())
@@ -432,30 +494,40 @@ class OutreachEngine:
                         subject=subject,
                         body=body,
                         status="draft",
-                        created_at=datetime.now(timezone.utc)
+                        created_at=datetime.now(timezone.utc),
                     )
 
                     # Store draft
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO revenue_actions (id, lead_id, action_type, action_data, success, created_at, executed_by)
                         VALUES ($1, $2, 'outreach_draft', $3, true, $4, 'system:outreach_engine')
-                    """,
+                        """,
                         uuid.UUID(draft_id),
                         lead["id"],
-                        json.dumps({
-                            "sequence_step": sequence_step,
-                            "subject": subject,
-                            "body": body,
-                            "status": "draft",
-                            "campaign_id": campaign_id,
-                        }),
-                        datetime.now(timezone.utc)
+                        json.dumps(
+                            {
+                                "sequence_step": sequence_step,
+                                "subject": subject,
+                                "body": body,
+                                "status": "draft",
+                                "campaign_id": str(campaign_id),
+                                "prompt_optimizer": optimizer_meta,
+                            }
+                        ),
+                        datetime.now(timezone.utc),
                     )
 
-                    logger.info(f"Campaign outreach draft {draft_id[:8]}... created for lead {lead_id[:8]}...")
+                    logger.info(
+                        "Campaign outreach draft %s created for lead %s",
+                        f"{draft_id[:8]}...",
+                        f"{lead_id[:8]}...",
+                    )
                     return True, "Campaign outreach draft created", draft
             except ImportError:
                 logger.warning("campaign_manager not available, falling back to standard templates")
+            except Exception as exc:
+                logger.error("Campaign outreach draft generation failed: %s", exc)
 
         # Detect if roofing company (use roofing templates) or tech (use tech templates)
         company_name = (lead["company_name"] or "").lower()
@@ -496,6 +568,48 @@ class OutreachEngine:
 
         subject = template["subject"].format(**variables)
         body = template["body"].format(**variables)
+        optimizer_meta = {}
+        try:
+            from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+            optimizer = get_revenue_prompt_optimizer()
+            leads_context = json.dumps(
+                {
+                    "lead_id": str(lead["id"]),
+                    "company_name": lead.get("company_name"),
+                    "contact_name": lead.get("contact_name"),
+                    "email": lead.get("email"),
+                    "industry": lead.get("industry"),
+                    "source": lead.get("source"),
+                    "metadata": metadata,
+                },
+                default=str,
+            )
+            revenue_metrics = json.dumps(
+                {
+                    "pipeline_stage": lead.get("stage"),
+                    "sequence_step": sequence_step,
+                    "template_key": template_key,
+                    "is_roofing": is_roofing,
+                },
+                default=str,
+            )
+            opt = await optimizer.optimize(
+                leads=leads_context,
+                revenue_metrics=revenue_metrics,
+                subject=subject,
+                body=body,
+                pool=pool,
+            )
+            subject = opt.subject
+            body = opt.body
+            optimizer_meta = {
+                "used_optimizer": opt.used_optimizer,
+                "compiled": opt.compiled,
+                "compiled_at": opt.compiled_at,
+            }
+        except Exception as exc:
+            logger.debug("DSPy revenue optimizer unavailable: %s", exc)
 
         # Create draft
         draft_id = str(uuid.uuid4())
@@ -521,7 +635,8 @@ class OutreachEngine:
                     "sequence_step": sequence_step,
                     "subject": subject,
                     "body": body,
-                    "status": "draft"
+                    "status": "draft",
+                    "prompt_optimizer": optimizer_meta,
                 }),
                 datetime.now(timezone.utc)
             )
@@ -677,15 +792,33 @@ class OutreachEngine:
                 metadata={"draft_id": draft_id, "approved_by": approved_by}
             )
 
-            # Record engagement
-            await pool.execute("""
-                INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
-                VALUES ($1, 'outreach_sent', $2, 'email', $3)
-            """,
-                draft["lead_id"],
-                json.dumps({"draft_id": draft_id, "sequence_step": action_data.get("sequence_step", 1)}),
-                now
-            )
+            # Record engagement in lead_activities (lead_engagement_history isn't present in all DBs)
+            try:
+                sequence_step = action_data.get("sequence_step")
+                try:
+                    sequence_step_int = int(sequence_step) if sequence_step is not None else None
+                except Exception:
+                    sequence_step_int = None
+                await pool.execute(
+                    """
+                    INSERT INTO lead_activities (
+                        id, lead_id, activity_type, subject, description,
+                        outcome, completed_at, created_at, created_by, event_type, event_value
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9, $10)
+                    """,
+                    uuid.uuid4(),
+                    draft["lead_id"],
+                    "email",
+                    action_data.get("subject") or "Outreach",
+                    json.dumps({"draft_id": draft_id, "sequence_step": sequence_step, "channel": "email"}, default=str),
+                    "sent",
+                    now,
+                    approved_by,
+                    "outreach_sent",
+                    sequence_step_int,
+                )
+            except Exception as act_err:
+                logger.debug("Lead activity logging skipped for outreach_sent: %s", act_err)
 
             self._daily_outreach_count += 1
             logger.info(f"Outreach {draft_id[:8]}... approved by {approved_by} and queued (daily count: {self._daily_outreach_count})")
@@ -704,15 +837,27 @@ class OutreachEngine:
         now = datetime.now(timezone.utc)
 
         try:
-            # Record engagement
-            await pool.execute("""
-                INSERT INTO lead_engagement_history (lead_id, event_type, event_data, channel, timestamp)
-                VALUES ($1, 'reply_received', $2, 'email', $3)
-            """,
-                uuid.UUID(lead_id),
-                json.dumps({"summary": reply_summary}),
-                now
-            )
+            # Record engagement in lead_activities (lead_engagement_history isn't present in all DBs)
+            try:
+                await pool.execute(
+                    """
+                    INSERT INTO lead_activities (
+                        id, lead_id, activity_type, subject, description,
+                        outcome, completed_at, created_at, created_by, event_type
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8, $9)
+                    """,
+                    uuid.uuid4(),
+                    uuid.UUID(lead_id),
+                    "email",
+                    "Reply received",
+                    reply_summary or "",
+                    "received",
+                    now,
+                    "human:manual_entry",
+                    "reply_received",
+                )
+            except Exception as act_err:
+                logger.debug("Lead activity logging skipped for reply_received: %s", act_err)
 
             # Update lead state
             from pipeline_state_machine import get_state_machine, PipelineState

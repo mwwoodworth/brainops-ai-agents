@@ -14,6 +14,7 @@ This module implements bleeding-edge lead scoring using:
 import json
 import logging
 import os
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -278,15 +279,33 @@ class AdvancedLeadScoringEngine:
         conn = self._get_connection()
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT event_type, COUNT(*) as count,
-                           SUM(engagement_value) as total_value
-                    FROM lead_engagement_history
-                    WHERE lead_id = %s
-                    AND timestamp > NOW() - INTERVAL '30 days'
-                    GROUP BY event_type
-                """, (lead_id,))
-                engagement = {row['event_type']: row for row in cur.fetchall()}
+                try:
+                    cur.execute(
+                        """
+                        SELECT event_type, COUNT(*) as count,
+                               COALESCE(SUM(COALESCE(event_value, 1)), 0) as total_value
+                        FROM lead_activities
+                        WHERE lead_id = %s
+                        AND created_at > NOW() - INTERVAL '30 days'
+                        GROUP BY event_type
+                        """,
+                        (lead_id,),
+                    )
+                    engagement = {row["event_type"]: row for row in cur.fetchall()}
+                except Exception:
+                    # Backwards-compatible fallback for DBs that still use the legacy table.
+                    cur.execute(
+                        """
+                        SELECT event_type, COUNT(*) as count,
+                               SUM(engagement_value) as total_value
+                        FROM lead_engagement_history
+                        WHERE lead_id = %s
+                        AND timestamp > NOW() - INTERVAL '30 days'
+                        GROUP BY event_type
+                        """,
+                        (lead_id,),
+                    )
+                    engagement = {row["event_type"]: row for row in cur.fetchall()}
         finally:
             conn.close()
 
@@ -625,17 +644,42 @@ class AdvancedLeadScoringEngine:
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    INSERT INTO lead_engagement_history (
-                        lead_id, event_type, event_data, engagement_value, channel
-                    ) VALUES (%s, %s, %s, %s, %s)
-                """, (
-                    lead_id,
-                    event_type,
-                    json.dumps(event_data or {}),
-                    engagement_value,
-                    channel
-                ))
+                try:
+                    cur.execute(
+                        """
+                        INSERT INTO lead_activities (
+                            id, lead_id, activity_type, subject, description,
+                            outcome, completed_at, created_at, created_by, event_type, event_value
+                        ) VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW(), %s, %s, %s)
+                        """,
+                        (
+                            str(uuid.uuid4()),
+                            lead_id,
+                            channel or "engagement",
+                            event_type,
+                            json.dumps(event_data or {}),
+                            "recorded",
+                            "system:advanced_lead_scoring",
+                            event_type,
+                            engagement_value,
+                        ),
+                    )
+                except Exception:
+                    # Backwards-compatible fallback for DBs that still use the legacy table.
+                    cur.execute(
+                        """
+                        INSERT INTO lead_engagement_history (
+                            lead_id, event_type, event_data, engagement_value, channel
+                        ) VALUES (%s, %s, %s, %s, %s)
+                        """,
+                        (
+                            lead_id,
+                            event_type,
+                            json.dumps(event_data or {}),
+                            engagement_value,
+                            channel,
+                        ),
+                    )
                 conn.commit()
 
             # Trigger rescore

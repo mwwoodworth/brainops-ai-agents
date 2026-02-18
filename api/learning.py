@@ -229,7 +229,10 @@ async def get_status() -> dict[str, Any]:
                 COUNT(*) FILTER (WHERE status = 'proposed') as pending,
                 COUNT(*) FILTER (WHERE status = 'approved') as approved,
                 COUNT(*) FILTER (WHERE status = 'implementing') as implementing,
+                COUNT(*) FILTER (WHERE status = 'queued_for_self_build') as queued_for_self_build,
                 COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                COUNT(*) FILTER (WHERE status = 'self_build_completed') as self_build_completed,
+                COUNT(*) FILTER (WHERE status = 'pr_opened') as pr_opened,
                 COUNT(*) FILTER (WHERE status = 'rejected') as rejected,
                 COUNT(*) FILTER (WHERE auto_approved = true) as auto_approved_count,
                 MAX(created_at) as latest_proposal
@@ -270,7 +273,10 @@ async def get_status() -> dict[str, Any]:
                 "pending": stats['pending'] if stats else 0,
                 "approved": stats['approved'] if stats else 0,
                 "implementing": stats['implementing'] if stats else 0,
+                "queued_for_self_build": stats['queued_for_self_build'] if stats else 0,
                 "completed": stats['completed'] if stats else 0,
+                "self_build_completed": stats['self_build_completed'] if stats else 0,
+                "pr_opened": stats['pr_opened'] if stats else 0,
                 "rejected": stats['rejected'] if stats else 0,
                 "auto_approved_count": stats['auto_approved_count'] if stats else 0,
                 "latest_proposal": stats['latest_proposal'].isoformat() if stats and stats['latest_proposal'] else None

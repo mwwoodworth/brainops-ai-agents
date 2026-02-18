@@ -191,9 +191,7 @@ class TenantScopedPool:
         """Release a connection and clear tenant context."""
         try:
             # Clear tenant context to prevent leakage
-            await connection.execute(
-                "SELECT set_config('app.current_tenant_id', '', false)"
-            )
+            await connection.execute("RESET app.current_tenant_id")
         except Exception:
             pass  # Connection may already be closed
         raw_pool = self._get_raw_pool()

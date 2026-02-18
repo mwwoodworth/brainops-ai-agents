@@ -276,6 +276,10 @@ class AITaskQueueConsumer:
 
         try:
             timeout_seconds = float(os.getenv("AI_TASK_QUEUE_EXECUTION_TIMEOUT_SECONDS", "60"))
+            if task_type == "self_build":
+                timeout_seconds = float(os.getenv("AI_TASK_QUEUE_SELF_BUILD_TIMEOUT_SECONDS", "900"))
+            elif task_type == "revenue_prompt_compile":
+                timeout_seconds = float(os.getenv("AI_TASK_QUEUE_DSPY_COMPILE_TIMEOUT_SECONDS", "600"))
 
             if task_type == "lead_nurturing":
                 result = await asyncio.wait_for(
@@ -285,6 +289,16 @@ class AITaskQueueConsumer:
             elif task_type == "quality_check":
                 result = await asyncio.wait_for(
                     self._handle_quality_check(task_id, payload),
+                    timeout=timeout_seconds,
+                )
+            elif task_type == "self_build":
+                result = await asyncio.wait_for(
+                    self._handle_self_build(task_id, tenant_id, payload),
+                    timeout=timeout_seconds,
+                )
+            elif task_type == "revenue_prompt_compile":
+                result = await asyncio.wait_for(
+                    self._handle_revenue_prompt_compile(task_id, tenant_id, payload),
                     timeout=timeout_seconds,
                 )
             else:
@@ -415,6 +429,79 @@ class AITaskQueueConsumer:
             {"task_id": task_id, "action": "quality_check", "payload": payload, "use_graph_context": False},
         )
         return {"status": "completed", "result": result}
+
+    async def _handle_self_build(
+        self,
+        task_id: str,
+        tenant_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._executor:
+            raise RuntimeError("AgentExecutor not available")
+
+        enabled = os.getenv("ENABLE_SELF_CODING_ENGINE", "false").strip().lower() in ("true", "1", "yes")
+        if not enabled:
+            return {"status": "skipped", "reason": "self_coding_engine_disabled"}
+
+        proposal_id = str(payload.get("proposal_id") or "").strip()
+        if not proposal_id:
+            return {"status": "skipped", "reason": "missing_proposal_id"}
+
+        builder_task: dict[str, Any] = {
+            "task_id": task_id,
+            "tenant_id": tenant_id,
+            "action": payload.get("action") or "implement_proposal",
+            "proposal_id": proposal_id,
+            "repo_path": payload.get("repo_path"),
+            "github_repo": payload.get("github_repo"),
+            "base_branch": payload.get("base_branch"),
+            "test_command": payload.get("test_command"),
+            "use_graph_context": bool(payload.get("use_graph_context", True)),
+        }
+
+        result = await self._executor.execute("SelfBuilder", builder_task)
+        if isinstance(result, dict) and result.get("status") in {"error", "failed", "skipped", "blocked"}:
+            return result
+        return {"status": "completed", "result": result}
+
+    async def _handle_revenue_prompt_compile(
+        self,
+        task_id: str,
+        tenant_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Phase 2: Revenue reinforcement.
+
+        Recompile the DSPy revenue optimizer using the latest REAL outcomes.
+        """
+        try:
+            from optimization.revenue_prompt_optimizer import get_revenue_prompt_optimizer
+
+            optimizer = get_revenue_prompt_optimizer()
+        except Exception as exc:
+            return {"status": "skipped", "reason": f"optimizer_import_failed:{exc}"}
+
+        if not optimizer.enabled():
+            return {"status": "skipped", "reason": "dspy_disabled_or_unavailable"}
+
+        force = bool(payload.get("force", True))
+        lead_id = payload.get("lead_id")
+        reason = payload.get("reason")
+
+        pool = get_pool()
+        result = await optimizer.ensure_compiled(pool=pool, force=force)
+        if not isinstance(result, dict):
+            result = {"status": "error", "error": "unexpected_optimizer_result"}
+
+        # Attach context for auditability in ai_task_queue.result.
+        result["task_id"] = task_id
+        result["tenant_id"] = tenant_id
+        if lead_id:
+            result["lead_id"] = lead_id
+        if reason:
+            result["reason"] = reason
+        return result
 
     async def _update_task_status(
         self,
