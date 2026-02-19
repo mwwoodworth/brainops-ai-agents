@@ -195,8 +195,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.31.0"
-        )  # Dead file cleanup: 26 files archived, DB safety audit complete
+            "VERSION", "v11.32.0"
+        )  # RevenueOptimizer JSON serialization fix, ecosystem-wide bug fixes
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
