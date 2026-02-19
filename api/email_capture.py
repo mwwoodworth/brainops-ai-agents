@@ -8,6 +8,7 @@ import os
 import logging
 import ipaddress
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, EmailStr
@@ -29,6 +30,37 @@ class EmailCaptureRequest(BaseModel):
 class EmailCaptureResponse(BaseModel):
     success: bool
     message: str
+
+
+def _resolve_tenant_uuid(http_request: Optional[Request]) -> Optional[str]:
+    """Resolve tenant UUID from request headers or environment."""
+    candidates: list[Optional[str]] = []
+    if http_request:
+        candidates.extend(
+            [
+                http_request.headers.get("x-tenant-id"),
+                http_request.headers.get("x-tenant_id"),
+                http_request.headers.get("x-org-id"),
+                http_request.headers.get("x-organization-id"),
+            ]
+        )
+    candidates.extend(
+        [
+            os.getenv("DEFAULT_TENANT_ID"),
+            os.getenv("TENANT_ID"),
+            os.getenv("APP_DEFAULT_TENANT_ID"),
+        ]
+    )
+
+    for raw in candidates:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        try:
+            return str(UUID(value))
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def _get_db_connection():
@@ -80,11 +112,21 @@ async def capture_email(payload: EmailCaptureRequest, http_request: Request):
 
         conn = _get_db_connection()
         cur = conn.cursor()
+        tenant_id = _resolve_tenant_uuid(http_request)
+        if not tenant_id:
+            logger.error("Email capture missing valid tenant context")
+            raise HTTPException(status_code=503, detail="Tenant context unavailable")
+
+        # Required for RLS policies using current_tenant_id().
+        cur.execute(
+            "SELECT set_config('app.current_tenant_id', %s, true)",
+            (tenant_id,),
+        )
 
         # Check if email already exists
         cur.execute(
-            "SELECT id FROM email_captures WHERE email = %s",
-            (payload.email,)
+            "SELECT id FROM email_captures WHERE email = %s AND tenant_id = %s",
+            (payload.email, tenant_id),
         )
         existing = cur.fetchone()
 
@@ -119,9 +161,10 @@ async def capture_email(payload: EmailCaptureRequest, http_request: Request):
               utm_medium,
               utm_campaign,
               ip_address,
-              user_agent
+              user_agent,
+              tenant_id
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             payload.email,
@@ -132,6 +175,7 @@ async def capture_email(payload: EmailCaptureRequest, http_request: Request):
             payload.utm_campaign,
             client_ip,
             user_agent,
+            tenant_id,
         ))
 
         capture_id = cur.fetchone()['id']
@@ -201,11 +245,19 @@ P.S. Reply to this email if you have any questions. I read every message.
 
 
 @router.get("/stats")
-async def get_capture_stats():
+async def get_capture_stats(request: Request):
     """Get email capture statistics"""
     try:
         conn = _get_db_connection()
         cur = conn.cursor()
+        tenant_id = _resolve_tenant_uuid(request)
+        if not tenant_id:
+            return {"total_captures": 0, "last_7_days": 0, "last_30_days": 0}
+
+        cur.execute(
+            "SELECT set_config('app.current_tenant_id', %s, true)",
+            (tenant_id,),
+        )
 
         cur.execute("""
             SELECT
@@ -213,7 +265,8 @@ async def get_capture_stats():
                 COUNT(CASE WHEN created_at > NOW() - INTERVAL '7 days' THEN 1 END) as last_7_days,
                 COUNT(CASE WHEN created_at > NOW() - INTERVAL '30 days' THEN 1 END) as last_30_days
             FROM email_captures
-        """)
+            WHERE tenant_id = %s
+        """, (tenant_id,))
         stats = cur.fetchone()
         conn.close()
 
