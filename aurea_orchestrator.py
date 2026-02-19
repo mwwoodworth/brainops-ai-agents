@@ -2355,59 +2355,93 @@ class AUREA:
     def _log_decision(self, decision: Decision) -> Optional[str]:
         """Log decision to database and return the database UUID - uses shared pool"""
         try:
+            tenant_for_rls = _resolve_tenant_uuid(self.tenant_id)
+            if not tenant_for_rls:
+                logger.error(
+                    "Failed to log decision: missing valid tenant context for RLS (tenant_id=%r)",
+                    self.tenant_id,
+                )
+                return None
+
             with _get_pooled_connection() as conn:
+                if conn is None:
+                    logger.error("Failed to log decision: no database connection available")
+                    return None
+
+                previous_autocommit = bool(getattr(conn, "autocommit", True))
+                conn.autocommit = False
                 cur = conn.cursor()
+                try:
+                    # Apply tenant context inside the same transaction as decision writes.
+                    # This keeps RLS-consistent behavior even when using pooled sync connections.
+                    cur.execute(
+                        """
+                        SELECT
+                            set_config('app.current_tenant_id', %s, true),
+                            set_config('app.tenant_id', %s, true),
+                            set_config('request.jwt.claim.tenant_id', %s, true),
+                            set_config('request.jwt.claim.organization_id', %s, true)
+                        """,
+                        (tenant_for_rls, tenant_for_rls, tenant_for_rls, tenant_for_rls),
+                    )
 
-                cur.execute(
-                    """
-                INSERT INTO aurea_decisions
-                (decision_type, description, confidence, impact_assessment,
-                 recommended_action, alternatives, requires_human_approval,
-                 execution_status, context, tenant_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                    (
-                        decision.type.value,
-                        decision.description,
-                        decision.confidence,
-                        decision.impact_assessment,
-                        decision.recommended_action,
-                        Json(decision.alternatives),
-                        decision.requires_human_approval,
-                        "pending",
-                        Json(decision.context),
-                        self.tenant_id,
-                    ),
-                )
+                    cur.execute(
+                        """
+                    INSERT INTO aurea_decisions
+                    (decision_type, description, confidence, impact_assessment,
+                     recommended_action, alternatives, requires_human_approval,
+                     execution_status, context, tenant_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                        (
+                            decision.type.value,
+                            decision.description,
+                            decision.confidence,
+                            decision.impact_assessment,
+                            decision.recommended_action,
+                            Json(decision.alternatives),
+                            decision.requires_human_approval,
+                            "pending",
+                            Json(decision.context),
+                            tenant_for_rls,
+                        ),
+                    )
 
-                result = cur.fetchone()
-                db_id = str(result[0]) if result else None
+                    result = cur.fetchone()
+                    db_id = str(result[0]) if result else None
 
-                # Store the database ID on the decision for later use
-                decision.db_id = db_id
+                    # Store the database ID on the decision for later use
+                    decision.db_id = db_id
 
-                # ALSO persist to ai_decisions table for visibility
-                # This table is the central AI decisions tracking table
-                self._persist_to_ai_decisions(decision, conn, cur)
+                    # ALSO persist to ai_decisions table for visibility
+                    # This table is the central AI decisions tracking table
+                    self._persist_to_ai_decisions(decision, conn, cur)
 
-                # Log to unified brain
-                self.memory.log_to_brain(
-                    "aurea_orchestrator",
-                    "decision_made",
-                    {
-                        "decision_id": decision.id,
-                        "db_id": db_id,
-                        "type": decision.type.value,
-                        "description": decision.description,
-                        "confidence": decision.confidence,
-                    },
-                )
+                    # Log to unified brain
+                    self.memory.log_to_brain(
+                        "aurea_orchestrator",
+                        "decision_made",
+                        {
+                            "decision_id": decision.id,
+                            "db_id": db_id,
+                            "type": decision.type.value,
+                            "description": decision.description,
+                            "confidence": decision.confidence,
+                        },
+                    )
 
-                conn.commit()
-                cur.close()
-
-                return db_id
+                    conn.commit()
+                    return db_id
+                except Exception:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        logger.debug("Rollback failed in _log_decision", exc_info=True)
+                    raise
+                finally:
+                    cur.close()
+                    conn.autocommit = previous_autocommit
 
         except Exception as e:
             logger.error(f"Failed to log decision: {e}")

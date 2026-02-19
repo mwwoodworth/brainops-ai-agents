@@ -8711,50 +8711,46 @@ async def get_product_inventory(authenticated: bool = Depends(verify_api_key)):
 
     # Never hardcode revenue. Compute live, truthy numbers (exclude tests).
     try:
-        from email_sender import get_db_connection
-        from psycopg2.extras import RealDictCursor
-
+        pool = get_pool()
         mrg_default_tenant = os.getenv(
             "MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
         )
 
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-        cursor.execute(
-            """
-            SELECT
-              COUNT(*) FILTER (WHERE NOT COALESCE(is_test, FALSE)) AS real_count,
-              COALESCE(SUM(price::numeric) FILTER (WHERE NOT COALESCE(is_test, FALSE)), 0) AS real_revenue,
-              COUNT(*) FILTER (WHERE COALESCE(is_test, FALSE)) AS test_count,
-              COALESCE(SUM(price::numeric) FILTER (WHERE COALESCE(is_test, FALSE)), 0) AS test_revenue
-            FROM gumroad_sales
-            WHERE lower(coalesce(metadata->>'refunded', 'false')) NOT IN ('true', '1')
-            """
+        gumroad = (
+            await pool.fetchrow(
+                """
+                SELECT
+                  COUNT(*) FILTER (WHERE NOT COALESCE(is_test, FALSE)) AS real_count,
+                  COALESCE(SUM(price::numeric) FILTER (WHERE NOT COALESCE(is_test, FALSE)), 0) AS real_revenue,
+                  COUNT(*) FILTER (WHERE COALESCE(is_test, FALSE)) AS test_count,
+                  COALESCE(SUM(price::numeric) FILTER (WHERE COALESCE(is_test, FALSE)), 0) AS test_revenue
+                FROM gumroad_sales
+                WHERE lower(coalesce(metadata->>'refunded', 'false')) NOT IN ('true', '1')
+                """
+            )
+            or {}
         )
-        gumroad = cursor.fetchone() or {}
 
-        cursor.execute(
-            """
-            SELECT
-              COUNT(*) AS active_subscriptions,
-              COALESCE(SUM(
-                CASE
-                  WHEN billing_cycle IN ('monthly', 'month') THEN amount
-                  WHEN billing_cycle IN ('annual', 'yearly', 'year') THEN amount / 12
-                  ELSE 0
-                END
-              ), 0) AS mrr
-            FROM mrg_subscriptions
-            WHERE tenant_id = %s
-              AND status = 'active'
-            """,
-            (mrg_default_tenant,),
+        mrg = (
+            await pool.fetchrow(
+                """
+                SELECT
+                  COUNT(*) AS active_subscriptions,
+                  COALESCE(SUM(
+                    CASE
+                      WHEN billing_cycle IN ('monthly', 'month') THEN amount
+                      WHEN billing_cycle IN ('annual', 'yearly', 'year') THEN amount / 12
+                      ELSE 0
+                    END
+                  ), 0) AS mrr
+                FROM mrg_subscriptions
+                WHERE tenant_id = $1
+                  AND status = 'active'
+                """,
+                mrg_default_tenant,
+            )
+            or {}
         )
-        mrg = cursor.fetchone() or {}
-
-        cursor.close()
-        conn.close()
 
         gumroad_lifetime = float(gumroad.get("real_revenue") or 0)
         mrg_mrr = float(mrg.get("mrr") or 0)
@@ -8782,45 +8778,45 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
     Separates real revenue from demo data.
     """
     try:
-        from email_sender import get_db_connection
-        from psycopg2.extras import RealDictCursor
-
-        conn = get_db_connection()
-        cursor = conn.cursor(cursor_factory=RealDictCursor)
-
-        # Get real Gumroad sales
-        cursor.execute(
-            """
-            SELECT
-                COUNT(*) as total_sales,
-                COALESCE(SUM(price::numeric), 0) as total_revenue,
-                MAX(sale_timestamp) as last_sale
-            FROM gumroad_sales
-            WHERE is_test = false OR is_test IS NULL
-        """
+        pool = get_pool()
+        mrg_default_tenant = os.getenv(
+            "MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
         )
-        gumroad = cursor.fetchone() or {"total_sales": 0, "total_revenue": 0}
 
-        # Get MRG subscriptions
-        cursor.execute(
-            """
-            SELECT
-                COUNT(*) as active_subscriptions,
-                COALESCE(SUM(
-                    CASE
-                        WHEN billing_cycle = 'monthly' THEN amount
-                        WHEN billing_cycle = 'annual' THEN amount / 12
-                        ELSE 0
-                    END
-                ), 0) as mrr
-            FROM mrg_subscriptions
-            WHERE status = 'active'
-        """
+        gumroad = (
+            await pool.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as total_sales,
+                    COALESCE(SUM(price::numeric), 0) as total_revenue,
+                    MAX(sale_timestamp) as last_sale
+                FROM gumroad_sales
+                WHERE is_test = false OR is_test IS NULL
+                """
+            )
+            or {"total_sales": 0, "total_revenue": 0}
         )
-        mrg = cursor.fetchone() or {"active_subscriptions": 0, "mrr": 0}
 
-        cursor.close()
-        conn.close()
+        mrg = (
+            await pool.fetchrow(
+                """
+                SELECT
+                    COUNT(*) as active_subscriptions,
+                    COALESCE(SUM(
+                        CASE
+                            WHEN billing_cycle = 'monthly' THEN amount
+                            WHEN billing_cycle = 'annual' THEN amount / 12
+                            ELSE 0
+                        END
+                    ), 0) as mrr
+                FROM mrg_subscriptions
+                WHERE tenant_id = $1
+                  AND status = 'active'
+                """,
+                mrg_default_tenant,
+            )
+            or {"active_subscriptions": 0, "mrr": 0}
+        )
 
         return {
             "timestamp": datetime.utcnow().isoformat(),
@@ -8843,7 +8839,7 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
         }
 
     except Exception as e:
-        logger.error(f"Revenue status failed: {e}")
+        logger.warning(f"Revenue status degraded: {e}")
         return {
             "timestamp": datetime.utcnow().isoformat(),
             "real_revenue": {
