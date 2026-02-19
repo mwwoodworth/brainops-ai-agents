@@ -144,13 +144,24 @@ async def test_brain_recall_success(client, auth_headers, monkeypatch):
             self.tenant_id = "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
             self.last_call = None
 
-        def recall(self, query, tenant_id=None, context=None, limit=10, memory_type=None):
+        def recall(
+            self,
+            query,
+            tenant_id=None,
+            context=None,
+            limit=10,
+            memory_type=None,
+            memory_category=None,
+            **kwargs,
+        ):
             self.last_call = {
                 "query": query,
                 "tenant_id": tenant_id,
                 "context": context,
                 "limit": limit,
                 "memory_type": memory_type,
+                "memory_category": memory_category,
+                "kwargs": kwargs,
             }
             return [{"id": "mem-1", "content": "roof inspection", "embedding": [0.1, 0.2]}]
 
