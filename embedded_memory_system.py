@@ -769,24 +769,23 @@ class EmbeddedMemorySystem:
                 return
 
             # Write to master (include required source_system and created_by)
-            async with self.pg_pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO unified_ai_memory (
-                        id, memory_type, source_system, source_agent, created_by, content,
-                        metadata, importance_score, created_at, last_accessed
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (id) DO UPDATE SET
-                        content = EXCLUDED.content,
-                        importance_score = EXCLUDED.importance_score,
-                        last_accessed = EXCLUDED.last_accessed
-                """,
-                    row['id'], row['memory_type'],
-                    dict(row).get('source_system', 'embedded_memory'),
-                    row['source_agent'],
-                    dict(row).get('created_by', 'embedded_memory'),
-                    row['content'], row['metadata'], row['importance_score'],
-                    row['created_at'], row['last_accessed']
-                )
+            await self.pg_pool.execute("""
+                INSERT INTO unified_ai_memory (
+                    id, memory_type, source_system, source_agent, created_by, content,
+                    metadata, importance_score, created_at, last_accessed
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    importance_score = EXCLUDED.importance_score,
+                    last_accessed = EXCLUDED.last_accessed
+            """,
+                row['id'], row['memory_type'],
+                dict(row).get('source_system', 'embedded_memory'),
+                row['source_agent'],
+                dict(row).get('created_by', 'embedded_memory'),
+                row['content'], row['metadata'], row['importance_score'],
+                row['created_at'], row['last_accessed']
+            )
 
             # Mark as synced
             cursor.execute(
@@ -877,23 +876,22 @@ class EmbeddedMemorySystem:
             if not row:
                 return
 
-            async with self.pg_pool.acquire() as conn:
-                await conn.execute("""
-                    INSERT INTO ai_autonomous_tasks (
-                        id, task_type, status, priority, trigger_condition,
-                        result, error_log, created_at, started_at, completed_at
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                    ON CONFLICT (id) DO UPDATE SET
-                        status = EXCLUDED.status,
-                        result = EXCLUDED.result,
-                        error_log = EXCLUDED.error_log,
-                        started_at = EXCLUDED.started_at,
-                        completed_at = EXCLUDED.completed_at
-                """,
-                    row['id'], row['task_type'], row['status'], row['priority'],
-                    row['trigger_condition'], row['result'], row['error_log'],
-                    row['created_at'], row['started_at'], row['completed_at']
-                )
+            await self.pg_pool.execute("""
+                INSERT INTO ai_autonomous_tasks (
+                    id, task_type, status, priority, trigger_condition,
+                    result, error_log, created_at, started_at, completed_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (id) DO UPDATE SET
+                    status = EXCLUDED.status,
+                    result = EXCLUDED.result,
+                    error_log = EXCLUDED.error_log,
+                    started_at = EXCLUDED.started_at,
+                    completed_at = EXCLUDED.completed_at
+            """,
+                row['id'], row['task_type'], row['status'], row['priority'],
+                row['trigger_condition'], row['result'], row['error_log'],
+                row['created_at'], row['started_at'], row['completed_at']
+            )
 
             cursor.execute(
                 "UPDATE ai_autonomous_tasks SET synced_at = ? WHERE id = ?",
@@ -934,94 +932,93 @@ class EmbeddedMemorySystem:
         logger.info(f"🔄 Syncing from master Postgres (local_count={local_count}, force={force})...")
 
         try:
-            async with self.pg_pool.acquire() as conn:
-                # Sync memories
-                memories = await conn.fetch("""
-                    SELECT * FROM unified_ai_memory
-                    ORDER BY created_at DESC
-                    LIMIT $1
-                """, memory_sync_limit)
+            # Sync memories
+            memories = await self.pg_pool.fetch("""
+                SELECT * FROM unified_ai_memory
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, memory_sync_limit)
 
-                cursor = self.sqlite_conn.cursor()
-                generated_count = 0
+            cursor = self.sqlite_conn.cursor()
+            generated_count = 0
 
-                for mem in memories:
-                    mem_id = str(mem['id'])
+            for mem in memories:
+                mem_id = str(mem['id'])
 
-                    # Check if we already have a valid embedding locally
-                    cursor.execute("SELECT embedding FROM unified_ai_memory WHERE id = ?", (mem_id,))
-                    row = cursor.fetchone()
+                # Check if we already have a valid embedding locally
+                cursor.execute("SELECT embedding FROM unified_ai_memory WHERE id = ?", (mem_id,))
+                row = cursor.fetchone()
 
-                    embedding = None
-                    if row and row[0]:
-                        # Reuse existing local embedding
-                        embedding = row[0]
-                    elif mem.get('content') and generated_count < max_embeddings_per_sync:
-                        # Run sync embedding provider work off-loop to avoid
-                        # blocking health checks under load.
-                        embedding = await asyncio.to_thread(self._encode_embedding, mem['content'])
-                        if embedding:
-                            generated_count += 1
+                embedding = None
+                if row and row[0]:
+                    # Reuse existing local embedding
+                    embedding = row[0]
+                elif mem.get('content') and generated_count < max_embeddings_per_sync:
+                    # Run sync embedding provider work off-loop to avoid
+                    # blocking health checks under load.
+                    embedding = await asyncio.to_thread(self._encode_embedding, mem['content'])
+                    if embedding:
+                        generated_count += 1
 
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO unified_ai_memory (
-                            id, memory_type, source_agent, content, embedding,
-                            metadata, importance_score, access_count,
-                            created_at, last_accessed, synced_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        mem_id,
-                        mem.get('memory_type'), mem.get('source_agent'),
-                        mem.get('content'), embedding, mem.get('metadata'),
-                        mem.get('importance_score', 0.5), 0,
-                        str(mem.get('created_at')) if mem.get('created_at') else None,
-                        str(mem.get('last_accessed')) if mem.get('last_accessed') else None,
-                        datetime.now().isoformat()
-                    ))
-
-                # Sync tasks
-                tasks = await conn.fetch("""
-                    SELECT * FROM ai_autonomous_tasks
-                    WHERE status IN ('pending', 'in_progress')
-                    ORDER BY created_at DESC
-                    LIMIT $1
-                """, task_sync_limit)
-
-                for task in tasks:
-                    cursor.execute("""
-                        INSERT OR REPLACE INTO ai_autonomous_tasks (
-                            id, task_type, status, priority, trigger_condition,
-                            result, error_log, created_at, started_at,
-                            completed_at, synced_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (
-                        str(task['id']),  # Convert UUID to string
-                        task.get('task_type'), task.get('status'),
-                        task.get('priority'), task.get('trigger_condition'),
-                        task.get('result'), task.get('error_log'),
-                        str(task.get('created_at')) if task.get('created_at') else None,
-                        str(task.get('started_at')) if task.get('started_at') else None,
-                        str(task.get('completed_at')) if task.get('completed_at') else None,
-                        datetime.now().isoformat()
-                    ))
-
-                self.sqlite_conn.commit()
-
-                # Update sync metadata
                 cursor.execute("""
-                    INSERT OR REPLACE INTO sync_metadata (table_name, last_sync_time, last_sync_count, total_records)
-                    VALUES ('unified_ai_memory', ?, ?, ?),
-                           ('ai_autonomous_tasks', ?, ?, ?)
+                    INSERT OR REPLACE INTO unified_ai_memory (
+                        id, memory_type, source_agent, content, embedding,
+                        metadata, importance_score, access_count,
+                        created_at, last_accessed, synced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    datetime.now().isoformat(), len(memories),
-                    cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0],
-                    datetime.now().isoformat(), len(tasks),
-                    cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks").fetchone()[0]
+                    mem_id,
+                    mem.get('memory_type'), mem.get('source_agent'),
+                    mem.get('content'), embedding, mem.get('metadata'),
+                    mem.get('importance_score', 0.5), 0,
+                    str(mem.get('created_at')) if mem.get('created_at') else None,
+                    str(mem.get('last_accessed')) if mem.get('last_accessed') else None,
+                    datetime.now().isoformat()
                 ))
-                self.sqlite_conn.commit()
 
-                self.last_sync = datetime.now()
-                logger.info(f"✅ Synced {len(memories)} memories, {len(tasks)} tasks from master")
+            # Sync tasks
+            tasks = await self.pg_pool.fetch("""
+                SELECT * FROM ai_autonomous_tasks
+                WHERE status IN ('pending', 'in_progress')
+                ORDER BY created_at DESC
+                LIMIT $1
+            """, task_sync_limit)
+
+            for task in tasks:
+                cursor.execute("""
+                    INSERT OR REPLACE INTO ai_autonomous_tasks (
+                        id, task_type, status, priority, trigger_condition,
+                        result, error_log, created_at, started_at,
+                        completed_at, synced_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    str(task['id']),  # Convert UUID to string
+                    task.get('task_type'), task.get('status'),
+                    task.get('priority'), task.get('trigger_condition'),
+                    task.get('result'), task.get('error_log'),
+                    str(task.get('created_at')) if task.get('created_at') else None,
+                    str(task.get('started_at')) if task.get('started_at') else None,
+                    str(task.get('completed_at')) if task.get('completed_at') else None,
+                    datetime.now().isoformat()
+                ))
+
+            self.sqlite_conn.commit()
+
+            # Update sync metadata
+            cursor.execute("""
+                INSERT OR REPLACE INTO sync_metadata (table_name, last_sync_time, last_sync_count, total_records)
+                VALUES ('unified_ai_memory', ?, ?, ?),
+                       ('ai_autonomous_tasks', ?, ?, ?)
+            """, (
+                datetime.now().isoformat(), len(memories),
+                cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0],
+                datetime.now().isoformat(), len(tasks),
+                cursor.execute("SELECT COUNT(*) FROM ai_autonomous_tasks").fetchone()[0]
+            ))
+            self.sqlite_conn.commit()
+
+            self.last_sync = datetime.now()
+            logger.info(f"✅ Synced {len(memories)} memories, {len(tasks)} tasks from master")
 
         except Exception as e:
             logger.error(f"❌ Sync from master failed: {e!r}")

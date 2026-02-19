@@ -289,6 +289,61 @@ class AsyncDatabasePool(BasePool):
             raise RuntimeError("Database pool not initialized. Call initialize() first.")
         return self._pool.acquire(timeout=self.config.acquire_timeout)
 
+    async def _run_operation(
+        self,
+        conn: asyncpg.Connection,
+        operation: str,
+        query: str,
+        *args: Any,
+        timeout: Optional[float] = None,
+        column: int = 0,
+    ) -> Any:
+        """Execute a single operation on an acquired connection."""
+        if operation == "fetch":
+            return await conn.fetch(query, *args, timeout=timeout)
+        if operation == "fetchrow":
+            return await conn.fetchrow(query, *args, timeout=timeout)
+        if operation == "fetchval":
+            return await conn.fetchval(query, *args, column=column, timeout=timeout)
+        if operation == "execute":
+            return await conn.execute(query, *args, timeout=timeout)
+        raise ValueError(f"Unknown operation: {operation}")
+
+    async def _run_operation_with_tenant_context(
+        self,
+        conn: asyncpg.Connection,
+        operation: str,
+        query: str,
+        *args: Any,
+        timeout: Optional[float] = None,
+        column: int = 0,
+    ) -> Any:
+        """
+        Execute operation with deterministic tenant context.
+
+        We set tenant context inside the same transaction as the operation so RLS
+        remains consistent even when using transaction poolers.
+        """
+        if not self._default_tenant_id:
+            return await self._run_operation(conn, operation, query, *args, timeout=timeout, column=column)
+
+        async with conn.transaction():
+            await conn.execute(
+                "SELECT set_config('app.current_tenant_id', $1, true), "
+                "set_config('app.tenant_id', $1, true), "
+                "set_config('request.jwt.claim.tenant_id', $1, true), "
+                "set_config('request.jwt.claim.organization_id', $1, true)",
+                self._default_tenant_id,
+            )
+            return await self._run_operation(
+                conn,
+                operation,
+                query,
+                *args,
+                timeout=timeout,
+                column=column,
+            )
+
     async def _execute_with_retry(
         self,
         operation: str,
@@ -309,16 +364,14 @@ class AsyncDatabasePool(BasePool):
         for attempt in range(max_retries + 1):
             try:
                 async with self.pool.acquire(timeout=self.config.acquire_timeout) as conn:
-                    if operation == "fetch":
-                        return await conn.fetch(query, *args, timeout=timeout)
-                    elif operation == "fetchrow":
-                        return await conn.fetchrow(query, *args, timeout=timeout)
-                    elif operation == "fetchval":
-                        return await conn.fetchval(query, *args, column=column, timeout=timeout)
-                    elif operation == "execute":
-                        return await conn.execute(query, *args, timeout=timeout)
-                    else:
-                        raise ValueError(f"Unknown operation: {operation}")
+                    return await self._run_operation_with_tenant_context(
+                        conn,
+                        operation,
+                        query,
+                        *args,
+                        timeout=timeout,
+                        column=column,
+                    )
             except asyncio.TimeoutError as e:
                 last_error = e
                 logger.error(
@@ -411,6 +464,16 @@ class AsyncDatabasePool(BasePool):
         # executemany doesn't retry - it's typically used for bulk operations
         # where partial completion would be problematic
         async with self.pool.acquire(timeout=self.config.acquire_timeout) as conn:
+            if self._default_tenant_id:
+                async with conn.transaction():
+                    await conn.execute(
+                        "SELECT set_config('app.current_tenant_id', $1, true), "
+                        "set_config('app.tenant_id', $1, true), "
+                        "set_config('request.jwt.claim.tenant_id', $1, true), "
+                        "set_config('request.jwt.claim.organization_id', $1, true)",
+                        self._default_tenant_id,
+                    )
+                    return await conn.executemany(command, args, timeout=timeout)
             return await conn.executemany(command, args, timeout=timeout)
 
     async def test_connection(self, timeout: float = 4.0) -> bool:
