@@ -115,6 +115,10 @@ class OperationalMonitor:
         if memory_alert:
             alerts.append(memory_alert)
 
+        # Keep recent alerts focused on active issues.
+        if not alerts:
+            self._recent_alerts = []
+
         for alert in alerts:
             await self._publish_alert(alert)
 
