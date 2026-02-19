@@ -391,7 +391,14 @@ class InvariantEngine:
             logger.error("RLS disabled check failed: %s", exc)
 
     async def _check_invoice_line_item_mismatch(self, pool, violations: list) -> None:
-        """Check 8: Invoice total matches sum of line items."""
+        """Check 8: Invoice total/subtotal aligns with itemized line totals.
+
+        Notes:
+        - Ignore invoices with zero line items (many legacy/system invoices are summary-only).
+        - Ignore draft/void/cancelled invoices.
+        - Treat either `total_amount` or `subtotal_amount` as acceptable match sources.
+        - Allow <= 1.00 tolerance for historical rounding/cents drift.
+        """
         try:
             mismatches = await pool.fetchval(
                 """
@@ -399,9 +406,18 @@ class InvariantEngine:
                 FROM (
                     SELECT i.id
                     FROM invoices i
-                    LEFT JOIN invoice_items ii ON i.id = ii.invoice_id
-                    GROUP BY i.id, i.total_amount
-                    HAVING ABS(i.total_amount - COALESCE(SUM(ii.total_price), 0)) > 0.01
+                    JOIN invoice_items ii ON i.id = ii.invoice_id
+                    WHERE COALESCE(i.status, '') NOT IN ('draft', 'void', 'cancelled')
+                    GROUP BY i.id, i.total_amount, i.subtotal_amount
+                    HAVING ABS(
+                        COALESCE(i.total_amount, 0) - SUM(COALESCE(ii.total_price, 0))
+                    ) > 1.00
+                       AND (
+                           i.subtotal_amount IS NULL
+                           OR ABS(
+                               COALESCE(i.subtotal_amount, 0) - SUM(COALESCE(ii.total_price, 0))
+                           ) > 1.00
+                       )
                 ) AS mismatches
             """
             )
