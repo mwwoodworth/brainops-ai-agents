@@ -17,7 +17,7 @@ import re
 import subprocess
 import uuid
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, TypedDict, TypeVar
 
@@ -668,7 +668,8 @@ class AgentExecutor:
             requested_caps = [requested_caps]
         capability_count = len([c for c in requested_caps if c])
         multi_step_tokens = sum(
-            1 for token in ("and", "then", "after", "workflow", "multi", "sequence", "orchestrate")
+            1
+            for token in ("and", "then", "after", "workflow", "multi", "sequence", "orchestrate")
             if token in action
         )
         score = 0.0
@@ -798,10 +799,7 @@ class AgentExecutor:
 
                 result = self._coerce_json_dict(value.get("result"))
                 status = str(
-                    metadata.get("status")
-                    or result.get("status")
-                    or value.get("status")
-                    or ""
+                    metadata.get("status") or result.get("status") or value.get("status") or ""
                 ).lower()
                 if status in {"failed", "error", "blocked", "timeout", "cancelled"}:
                     failures += 1
@@ -868,7 +866,10 @@ class AgentExecutor:
         if (
             self._agent_performance_cache
             and self._agent_performance_cache_updated_at
-            and (datetime.now(timezone.utc) - self._agent_performance_cache_updated_at).total_seconds() < 120
+            and (
+                datetime.now(timezone.utc) - self._agent_performance_cache_updated_at
+            ).total_seconds()
+            < 120
         ):
             return self._agent_performance_cache
 
@@ -1015,7 +1016,9 @@ class AgentExecutor:
                 deduped.append(helper)
         return deduped
 
-    async def _evaluate_agent_health_and_recover(self, agent_name: str, tenant_id: str) -> dict[str, Any]:
+    async def _evaluate_agent_health_and_recover(
+        self, agent_name: str, tenant_id: str
+    ) -> dict[str, Any]:
         """Detect degraded agents and trigger lightweight auto-recovery when enabled."""
         if not ENABLE_AGENT_HEALTH_AUTORECOVERY:
             return {"enabled": False}
@@ -1077,10 +1080,7 @@ class AgentExecutor:
         resolved_tenant = (tenant_id or "").strip() or self._default_tenant_id
         snapshot = await self._load_agent_performance_snapshot(resolved_tenant)
         ordered = sorted(
-            (
-                {"agent": agent_name, **metrics}
-                for agent_name, metrics in snapshot.items()
-            ),
+            ({"agent": agent_name, **metrics} for agent_name, metrics in snapshot.items()),
             key=lambda row: row.get("composite_score", 0),
             reverse=True,
         )
@@ -1091,7 +1091,9 @@ class AgentExecutor:
             "health_state": self._agent_health_state,
         }
 
-    def _infer_agent_capabilities(self, agent_name: str, agent: BaseAgent | None = None) -> set[str]:
+    def _infer_agent_capabilities(
+        self, agent_name: str, agent: BaseAgent | None = None
+    ) -> set[str]:
         """Infer capabilities for an agent using explicit declarations and naming heuristics."""
         capabilities: set[str] = set()
 
@@ -1131,7 +1133,8 @@ class AgentExecutor:
         if (
             self._capability_registry
             and self._capability_registry_updated_at
-            and (datetime.now(timezone.utc) - self._capability_registry_updated_at).total_seconds() < 60
+            and (datetime.now(timezone.utc) - self._capability_registry_updated_at).total_seconds()
+            < 60
         ):
             return self._capability_registry
 
@@ -1267,7 +1270,9 @@ class AgentExecutor:
         """Execute a single agent with optional execution budget enforcement."""
         agent = self.agents.get(agent_name)
         if agent is None:
-            raise RuntimeError(f"Agent '{agent_name}' is not implemented and no fallback is allowed.")
+            raise RuntimeError(
+                f"Agent '{agent_name}' is not implemented and no fallback is allowed."
+            )
 
         if not ENABLE_AGENT_EXECUTION_BUDGETS:
             result = await agent.execute(task)
@@ -1287,7 +1292,9 @@ class AgentExecutor:
         time_budget_seconds = max(1.0, float(budget["time_budget_seconds"]))
         try:
             result = await asyncio.wait_for(agent.execute(task), timeout=time_budget_seconds)
-            normalized = result if isinstance(result, dict) else {"status": "completed", "result": result}
+            normalized = (
+                result if isinstance(result, dict) else {"status": "completed", "result": result}
+            )
             normalized.setdefault("execution_budget", {})
             normalized["execution_budget"].update(
                 {
@@ -1355,7 +1362,9 @@ class AgentExecutor:
         orchestration_task = dict(task)
         tenant_id = self._resolve_tenant_for_task(orchestration_task)
         complexity = self._estimate_task_complexity(orchestration_task)
-        routed_agent = await self._route_agent_by_capability(requested_agent_name, orchestration_task)
+        routed_agent = await self._route_agent_by_capability(
+            requested_agent_name, orchestration_task
+        )
 
         dynamic_selection_meta: dict[str, Any] = {"enabled": False}
         if ENABLE_DYNAMIC_AGENT_SELECTION:
@@ -1424,7 +1433,9 @@ class AgentExecutor:
         delegation_plan = orchestration_task.get("delegation_plan")
         collaborator_names: list[str] = []
         if isinstance(orchestration_task.get("delegate_to"), (list, tuple, set)):
-            collaborator_names.extend(str(item) for item in orchestration_task["delegate_to"] if item)
+            collaborator_names.extend(
+                str(item) for item in orchestration_task["delegate_to"] if item
+            )
         if routed_agent not in collaborator_names:
             collaborator_names.insert(0, routed_agent)
 
@@ -1435,7 +1446,9 @@ class AgentExecutor:
                     continue
                 delegated_agent = str(item.get("agent") or routed_agent)
                 delegated_task = dict(orchestration_task)
-                delegated_task.update(item.get("task") if isinstance(item.get("task"), dict) else {})
+                delegated_task.update(
+                    item.get("task") if isinstance(item.get("task"), dict) else {}
+                )
                 delegated_task["_skip_multi_agent"] = True
                 delegated_task["_skip_langchain_runtime"] = True
                 delegated_task["_delegated_from"] = requested_agent_name
@@ -1460,7 +1473,10 @@ class AgentExecutor:
 
         max_concurrency = max(
             1,
-            int(orchestration_task.get("max_collaborators") or os.getenv("AGENT_COLLABORATION_MAX_CONCURRENCY", "4")),
+            int(
+                orchestration_task.get("max_collaborators")
+                or os.getenv("AGENT_COLLABORATION_MAX_CONCURRENCY", "4")
+            ),
         )
         semaphore = asyncio.Semaphore(max_concurrency)
 
@@ -1471,7 +1487,9 @@ class AgentExecutor:
                 result = await self._execute_single_agent_with_budget(agent_name, delegated_task)
             return {
                 "agent": agent_name,
-                "status": result.get("status", "completed") if isinstance(result, dict) else "completed",
+                "status": result.get("status", "completed")
+                if isinstance(result, dict)
+                else "completed",
                 "result": result,
             }
 
@@ -2160,7 +2178,9 @@ class AgentExecutor:
         runtime = self._get_langchain_runtime()
         if not runtime or not runtime.enabled():
             return {"status": "skipped", "reason": "langchain_runtime_disabled"}
-        return await runtime.run_chain_pattern(pattern=pattern, task=task, default_agent=default_agent)
+        return await runtime.run_chain_pattern(
+            pattern=pattern, task=task, default_agent=default_agent
+        )
 
     async def _log_ai_agent_execution_start(
         self,
@@ -2264,7 +2284,9 @@ class AgentExecutor:
             "composite_score": 0.0,
         }
         total_runs = int(metrics.get("total_runs", 0)) + 1
-        successful_runs = int(metrics.get("successful_runs", 0)) + (1 if status == "completed" else 0)
+        successful_runs = int(metrics.get("successful_runs", 0)) + (
+            1 if status == "completed" else 0
+        )
         prev_avg_ms = float(metrics.get("avg_execution_ms", 0.0))
         current_ms = float(duration_ms or 0.0)
         avg_execution_ms = ((prev_avg_ms * (total_runs - 1)) + current_ms) / max(1, total_runs)
@@ -2974,7 +2996,9 @@ class AgentExecutor:
                             if isinstance(help_request, dict):
                                 hinted_agents = help_request.get("agents")
                                 if isinstance(hinted_agents, (list, tuple, set)):
-                                    helper_agents.extend(str(item) for item in hinted_agents if item)
+                                    helper_agents.extend(
+                                        str(item) for item in hinted_agents if item
+                                    )
                             if not helper_agents:
                                 helper_agents = self._build_collaboration_protocol_plan(
                                     resolved_agent_name,
@@ -6843,20 +6867,36 @@ class RevenueOptimizerAgent(BaseAgent):
     def __init__(self):
         super().__init__("RevenueOptimizer", "analytics")
 
+    @staticmethod
+    def _sanitize_for_json(obj):
+        """Recursively convert datetime/Decimal/date objects for JSON serialization"""
+        from decimal import Decimal as Dec
+
+        if isinstance(obj, dict):
+            return {k: RevenueOptimizerAgent._sanitize_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [RevenueOptimizerAgent._sanitize_for_json(v) for v in obj]
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, date) and not isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, Dec):
+            return float(obj)
+        return obj
+
     async def execute(self, task: dict[str, Any]) -> dict[str, Any]:
         """Execute revenue optimization analysis on REAL business data"""
         analysis_type = task.get("type", task.get("action", "full_analysis"))
 
         if analysis_type == "monthly_revenue":
-            return await self.analyze_monthly_revenue()
+            result = await self.analyze_monthly_revenue()
         elif analysis_type == "top_customers":
-            return await self.get_top_customers_by_revenue()
+            result = await self.get_top_customers_by_revenue()
         elif analysis_type == "pricing":
-            return await self.analyze_pricing_optimization()
-        elif analysis_type == "full_analysis":
-            return await self.full_revenue_analysis()
+            result = await self.analyze_pricing_optimization()
         else:
-            return await self.full_revenue_analysis()
+            result = await self.full_revenue_analysis()
+        return self._sanitize_for_json(result)
 
     async def full_revenue_analysis(self) -> dict:
         """Run comprehensive revenue analysis from REAL production data"""
@@ -6899,7 +6939,7 @@ class RevenueOptimizerAgent(BaseAgent):
             # 5. Generate recommendations
             results["recommendations"] = self._generate_revenue_recommendations(results)
 
-            return results
+            return self._sanitize_for_json(results)
         except Exception as e:
             self.logger.error(f"Full revenue analysis failed: {e}")
             return {"status": "error", "error": str(e)}
@@ -7680,9 +7720,7 @@ class SelfBuildingAgent(BaseAgent):
             return {"status": "error", "error": "missing_proposal_id"}
 
         repo_path_raw = str(
-            task.get("repo_path")
-            or os.getenv("SELF_CODING_DEFAULT_REPO_PATH")
-            or str(_REPO_ROOT)
+            task.get("repo_path") or os.getenv("SELF_CODING_DEFAULT_REPO_PATH") or str(_REPO_ROOT)
         ).strip()
         repo_path = Path(repo_path_raw).expanduser().resolve()
 
@@ -7747,7 +7785,9 @@ class SelfBuildingAgent(BaseAgent):
             or os.getenv("GITHUB_REPO")
             or "mwwoodworth/brainops-ai-agents"
         )
-        base_branch = str(task.get("base_branch") or os.getenv("SELF_CODING_BASE_BRANCH") or "main").strip()
+        base_branch = str(
+            task.get("base_branch") or os.getenv("SELF_CODING_BASE_BRANCH") or "main"
+        ).strip()
 
         test_command = task.get("test_command")
         if isinstance(test_command, str) and test_command.strip():
@@ -7769,7 +7809,11 @@ class SelfBuildingAgent(BaseAgent):
         try:
             new_status = "queued_for_self_build"
             if result.get("status") == "completed":
-                if result.get("pr") and isinstance(result.get("pr"), dict) and not result["pr"].get("error"):
+                if (
+                    result.get("pr")
+                    and isinstance(result.get("pr"), dict)
+                    and not result["pr"].get("error")
+                ):
                     new_status = "pr_opened"
                 else:
                     new_status = "self_build_completed"
