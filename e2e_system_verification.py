@@ -223,8 +223,21 @@ class E2ESystemVerification:
 
     def _initialize_tests(self):
         """Initialize all endpoint tests"""
+        internal_health_key = (os.getenv("INTERNAL_HEALTH_KEY") or "").strip()
         headers = {"X-API-Key": API_KEY}
+        if internal_health_key:
+            headers["x-health-key"] = internal_health_key
         mcp_headers = {"X-API-Key": MCP_API_KEY}
+        erp_health_headers: dict[str, str] = {}
+        health_check_secret = (
+            os.getenv("HEALTH_CHECK_SECRET")
+            or os.getenv("WEATHERCRAFT_HEALTH_CHECK_SECRET")
+            or ""
+        ).strip()
+        if health_check_secret:
+            erp_health_headers["x-health-check-secret"] = health_check_secret
+        elif internal_health_key:
+            erp_health_headers["x-health-key"] = internal_health_key
 
         # ============================================
         # CORE API ENDPOINTS
@@ -500,6 +513,7 @@ class E2ESystemVerification:
                 EndpointTest(
                     name="ERP - API Health",
                     url=f"{ERP_URL}/api/health",
+                    headers=erp_health_headers or None,
                     expected_status=200,
                     expected_fields=["status", "services"],
                     category=SystemCategory.FRONTEND,

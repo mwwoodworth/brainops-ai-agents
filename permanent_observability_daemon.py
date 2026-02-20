@@ -130,6 +130,27 @@ class PermanentObservabilityDaemon:
         # Event queue for batch persistence
         self._event_queue: list[SystemEvent] = []
 
+        internal_health_key = (os.getenv("INTERNAL_HEALTH_KEY") or "").strip()
+        erp_health_secret = (
+            os.getenv("HEALTH_CHECK_SECRET")
+            or os.getenv("WEATHERCRAFT_HEALTH_CHECK_SECRET")
+            or ""
+        ).strip()
+        command_center_headers: dict[str, str] = {}
+        if internal_health_key:
+            command_center_headers["x-health-key"] = internal_health_key
+        if self.api_key:
+            command_center_headers.setdefault("X-API-Key", self.api_key)
+
+        weathercraft_headers: dict[str, str] = {}
+        weathercraft_url = "https://weathercraft-erp.vercel.app"
+        if erp_health_secret:
+            weathercraft_url = "https://weathercraft-erp.vercel.app/api/health"
+            weathercraft_headers["x-health-check-secret"] = erp_health_secret
+        elif internal_health_key:
+            weathercraft_url = "https://weathercraft-erp.vercel.app/api/health"
+            weathercraft_headers["x-health-key"] = internal_health_key
+
         # Service registry - all services to monitor
         self.services = {
             "brainops_ai_agents": {
@@ -151,8 +172,8 @@ class PermanentObservabilityDaemon:
                 "timeout": 10,
             },
             "weathercraft_erp": {
-                "url": "https://weathercraft-erp.vercel.app",
-                "headers": {},
+                "url": weathercraft_url,
+                "headers": weathercraft_headers,
                 "critical": True,
                 "timeout": 15,
             },
@@ -164,8 +185,8 @@ class PermanentObservabilityDaemon:
             },
             "command_center": {
                 "url": "https://brainops-command-center.vercel.app/api/unified-health",
-                "headers": {},
-                "critical": False,
+                "headers": command_center_headers,
+                "critical": True,
                 "timeout": 15,
             },
         }

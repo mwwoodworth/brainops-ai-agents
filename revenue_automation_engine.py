@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -309,12 +310,14 @@ class RevenueAutomationEngine:
     """
 
     def __init__(self):
-        self.leads: dict[str, Lead] = {}
-        self.transactions: dict[str, RevenueTransaction] = {}
+        self.leads: OrderedDict[str, Lead] = OrderedDict()
+        self.transactions: OrderedDict[str, RevenueTransaction] = OrderedDict()
         self.sequences: dict[str, AutomationSequence] = {}
         self.industry_configs: dict[Industry, dict[str, Any]] = {}
         self._initialized = False
         self._db_url = DATABASE_URL
+        self._lead_cache_limit = max(100, int(os.getenv("REVENUE_LEAD_CACHE_MAX", "2000")))
+        self._transaction_cache_limit = max(100, int(os.getenv("REVENUE_TX_CACHE_MAX", "2000")))
 
         # Revenue tracking
         self.total_revenue = Decimal("0.00")
@@ -393,7 +396,14 @@ class RevenueAutomationEngine:
         await self._setup_default_sequences()
 
         self._initialized = True
-        logger.info(f"Revenue Engine initialized: {len(self.leads)} leads, ${self.total_revenue} total revenue")
+        logger.info(
+            "Revenue Engine initialized (lead_cache=%s/%s, transaction_cache=%s/%s, total_revenue=$%s)",
+            len(self.leads),
+            self._lead_cache_limit,
+            len(self.transactions),
+            self._transaction_cache_limit,
+            self.total_revenue,
+        )
 
     async def _create_tables(self):
         """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
@@ -414,7 +424,12 @@ class RevenueAutomationEngine:
         except Exception as exc:
             logger.error("Table verification failed: %s", exc)
     async def _load_from_db(self):
-        """Load existing data from database"""
+        """Load lightweight config and aggregates from database.
+
+        SCALABILITY FIX:
+        - Do not preload lead rows into memory.
+        - Do not preload all completed transactions into memory.
+        """
         try:
             import asyncpg
             if not self._db_url:
@@ -422,101 +437,81 @@ class RevenueAutomationEngine:
 
             conn = await asyncpg.connect(self._db_url)
             try:
-                # Load leads - select specific columns for performance
-                rows = await conn.fetch("""
-                    SELECT id, lead_id, email, phone, name, contact_name, company, company_name,
-                           industry, source, status, stage, score, estimated_value, value_estimate,
-                           created_at, updated_at, contacted_at, converted_at,
-                           tags, custom_fields, automation_history
+                lead_aggs = await conn.fetchrow(
+                    """
+                    SELECT
+                        COALESCE(
+                            SUM(
+                                CASE
+                                    WHEN COALESCE(NULLIF(status, ''), NULLIF(stage, ''), 'new')
+                                         IN ('qualified', 'proposal_sent', 'negotiating')
+                                    THEN COALESCE(estimated_value, value_estimate, expected_revenue, 0)
+                                    ELSE 0
+                                END
+                            ),
+                            0
+                        )::numeric AS pipeline_value
                     FROM revenue_leads
-                    ORDER BY created_at DESC LIMIT 10000
-                """)
-                for row in rows:
-                    try:
-                        # Handle column name variations
-                        lead_id = row.get('lead_id') or str(row.get('id', ''))
-                        company = row.get('company') or row.get('company_name', '')
-                        name = row.get('name') or row.get('contact_name', '')
-
-                        # Parse industry/source/status with fallbacks
-                        try:
-                            industry = Industry(row.get('industry', 'generic'))
-                        except ValueError:
-                            industry = Industry.GENERIC
-
-                        try:
-                            source_val = row.get('source', 'website')
-                            source = LeadSource(source_val) if source_val else LeadSource.WEBSITE
-                        except ValueError:
-                            source = LeadSource.WEBSITE
-
-                        try:
-                            status_val = row.get('status') or row.get('stage', 'new')
-                            status = LeadStatus(status_val) if status_val else LeadStatus.NEW
-                        except ValueError:
-                            status = LeadStatus.NEW
-
-                        # Handle estimated_value variations
-                        est_value = row.get('estimated_value') or row.get('value_estimate') or 0
-
-                        lead = Lead(
-                            lead_id=lead_id,
-                            email=row.get('email', ''),
-                            phone=row.get('phone', ''),
-                            name=name,
-                            company=company,
-                            industry=industry,
-                            source=source,
-                            status=status,
-                            score=row.get('score', 0) or 0,
-                            estimated_value=Decimal(str(est_value)),
-                            created_at=row['created_at'].isoformat() if row.get('created_at') else None,
-                            updated_at=row['updated_at'].isoformat() if row.get('updated_at') else None,
-                            contacted_at=row['contacted_at'].isoformat() if row.get('contacted_at') else None,
-                            converted_at=row['converted_at'].isoformat() if row.get('converted_at') else None,
-                            tags=json.loads(row['tags']) if row.get('tags') and isinstance(row['tags'], str) else (row.get('tags') or []),
-                            custom_fields=json.loads(row['custom_fields']) if row.get('custom_fields') and isinstance(row['custom_fields'], str) else (row.get('custom_fields') or {}),
-                            automation_history=json.loads(row['automation_history']) if row.get('automation_history') and isinstance(row['automation_history'], str) else (row.get('automation_history') or []),
-                            notes=[]
-                        )
-                        if lead_id:
-                            self.leads[lead.lead_id] = lead
-                    except Exception as e:
-                        logger.warning(f"Failed to load lead {row.get('id', 'unknown')}: {e}")
-                        continue
-
-                logger.info(f"Loaded {len(self.leads)} leads from database")
-
-                # Load transactions and calculate revenue - select specific columns
-                rows = await conn.fetch("""
-                    SELECT transaction_id, lead_id, amount, currency, status,
-                           payment_method, processor_id, created_at, completed_at,
-                           industry, product_service, metadata
+                    """
+                )
+                tx_aggs = await conn.fetchrow(
+                    """
+                    SELECT
+                        COALESCE(SUM(amount), 0)::numeric AS total_revenue,
+                        COALESCE(
+                            SUM(
+                                CASE
+                                    WHEN COALESCE(completed_at, created_at) >= date_trunc('month', NOW())
+                                    THEN amount
+                                    ELSE 0
+                                END
+                            ),
+                            0
+                        )::numeric AS monthly_revenue
                     FROM revenue_transactions
                     WHERE status = 'completed'
-                """)
-                for row in rows:
-                    self.total_revenue += Decimal(str(row['amount']))
-                    tx = RevenueTransaction(
-                        transaction_id=row['transaction_id'],
-                        lead_id=row['lead_id'],
-                        amount=Decimal(str(row['amount'])),
-                        currency=row['currency'],
-                        status=row['status'],
-                        payment_method=row['payment_method'],
-                        processor_id=row['processor_id'],
-                        created_at=row['created_at'].isoformat() if row['created_at'] else None,
-                        completed_at=row['completed_at'].isoformat() if row['completed_at'] else None,
-                        industry=Industry(row['industry']) if row['industry'] else Industry.GENERIC,
-                        product_service=row['product_service'],
-                        metadata=json.loads(row['metadata']) if row['metadata'] else {}
-                    )
-                    self.transactions[tx.transaction_id] = tx
+                    """
+                )
 
-                # Calculate pipeline value
-                qualified_leads = [l for l in self.leads.values()
-                                 if l.status in [LeadStatus.QUALIFIED, LeadStatus.PROPOSAL_SENT, LeadStatus.NEGOTIATING]]
-                self.pipeline_value = sum(l.estimated_value for l in qualified_leads)
+                self.pipeline_value = Decimal(str((lead_aggs or {}).get("pipeline_value") or 0))
+                self.total_revenue = Decimal(str((tx_aggs or {}).get("total_revenue") or 0))
+                self.monthly_revenue = Decimal(str((tx_aggs or {}).get("monthly_revenue") or 0))
+
+                # Keep automation sequence config small and database-backed.
+                seq_rows = await conn.fetch(
+                    """
+                    SELECT sequence_id, name, industry, trigger, steps, active, success_rate, total_sent, conversions
+                    FROM automation_sequences
+                    WHERE active = true
+                    ORDER BY sequence_id
+                    LIMIT 200
+                    """
+                )
+                for row in seq_rows:
+                    try:
+                        raw_steps = row.get("steps") or []
+                        if isinstance(raw_steps, str):
+                            raw_steps = json.loads(raw_steps)
+                        industry_raw = (row.get("industry") or "generic").strip().lower()
+                        try:
+                            industry = Industry(industry_raw)
+                        except Exception:
+                            industry = Industry.GENERIC
+                        seq = AutomationSequence(
+                            sequence_id=row.get("sequence_id"),
+                            name=row.get("name") or row.get("sequence_id") or "Unnamed",
+                            industry=industry,
+                            trigger=row.get("trigger") or "new_lead",
+                            steps=raw_steps if isinstance(raw_steps, list) else [],
+                            active=bool(row.get("active")),
+                            success_rate=float(row.get("success_rate") or 0.0),
+                            total_sent=int(row.get("total_sent") or 0),
+                            conversions=int(row.get("conversions") or 0),
+                        )
+                        if seq.sequence_id:
+                            self.sequences[seq.sequence_id] = seq
+                    except Exception as seq_exc:
+                        logger.warning("Skipping invalid automation sequence row: %s", seq_exc)
 
             finally:
                 await conn.close()
@@ -576,7 +571,7 @@ class RevenueAutomationEngine:
         ]
 
         for seq in default_sequences:
-            self.sequences[seq.sequence_id] = seq
+            self.sequences.setdefault(seq.sequence_id, seq)
 
     # =========================================
     # DATABASE-BACKED LEAD ACCESS (SCALABILITY FIX)
@@ -652,6 +647,83 @@ class RevenueAutomationEngine:
             logger.error(f"Failed to fetch lead {lead_id} from database: {e}")
             return None
 
+    def _cache_lead(self, lead: Lead) -> None:
+        """LRU-ish bounded cache for lead objects."""
+        key = (lead.lead_id or "").strip()
+        if not key:
+            return
+        if key in self.leads:
+            self.leads.pop(key, None)
+        self.leads[key] = lead
+        while len(self.leads) > self._lead_cache_limit:
+            self.leads.popitem(last=False)
+
+    def _cache_transaction(self, tx: RevenueTransaction) -> None:
+        """LRU-ish bounded cache for transaction objects."""
+        key = (tx.transaction_id or "").strip()
+        if not key:
+            return
+        if key in self.transactions:
+            self.transactions.pop(key, None)
+        self.transactions[key] = tx
+        while len(self.transactions) > self._transaction_cache_limit:
+            self.transactions.popitem(last=False)
+
+    async def _fetch_transaction_from_db(self, transaction_id: str) -> Optional[RevenueTransaction]:
+        """Fetch a single transaction from DB on-demand."""
+        if not self._db_url:
+            return None
+        try:
+            import asyncpg
+
+            conn = await asyncpg.connect(self._db_url)
+            try:
+                row = await conn.fetchrow(
+                    """
+                    SELECT transaction_id, lead_id, amount, currency, status,
+                           payment_method, processor_id, created_at, completed_at,
+                           industry, product_service, metadata
+                    FROM revenue_transactions
+                    WHERE transaction_id = $1
+                    LIMIT 1
+                    """,
+                    transaction_id,
+                )
+                if not row:
+                    return None
+
+                industry_raw = (row.get("industry") or "generic").strip().lower()
+                try:
+                    industry = Industry(industry_raw)
+                except Exception:
+                    industry = Industry.GENERIC
+                metadata = row.get("metadata") or {}
+                if isinstance(metadata, str):
+                    try:
+                        metadata = json.loads(metadata)
+                    except Exception:
+                        metadata = {}
+
+                return RevenueTransaction(
+                    transaction_id=row.get("transaction_id"),
+                    lead_id=row.get("lead_id") or "",
+                    amount=Decimal(str(row.get("amount") or 0)),
+                    currency=row.get("currency") or "USD",
+                    status=row.get("status") or "pending",
+                    payment_method=row.get("payment_method") or "",
+                    processor_id=row.get("processor_id"),
+                    created_at=row["created_at"].isoformat() if row.get("created_at") else datetime.utcnow().isoformat(),
+                    completed_at=row["completed_at"].isoformat() if row.get("completed_at") else None,
+                    industry=industry,
+                    product_service=row.get("product_service") or "",
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                )
+            finally:
+                await conn.close()
+        except Exception as exc:
+            logger.error("Failed to fetch transaction %s from database: %s", transaction_id, exc)
+            return None
+
     async def get_lead(self, lead_id: str) -> Optional[Lead]:
         """Get a lead by ID - checks cache first, then database.
 
@@ -665,17 +737,14 @@ class RevenueAutomationEngine:
         """
         # Check in-memory cache first
         if lead_id in self.leads:
-            return self.leads[lead_id]
+            lead = self.leads.pop(lead_id)
+            self.leads[lead_id] = lead
+            return lead
 
         # Fallback to database lookup
         lead = await self._fetch_lead_from_db(lead_id)
         if lead:
-            # Cache the lead for future access (with size limit check)
-            if len(self.leads) < 50000:  # Prevent unbounded memory growth
-                self.leads[lead.lead_id] = lead
-            else:
-                # If cache is full, just return without caching
-                logger.debug(f"Lead cache full, not caching lead {lead_id}")
+            self._cache_lead(lead)
 
         return lead
 
@@ -743,7 +812,7 @@ class RevenueAutomationEngine:
             }]
         )
 
-        self.leads[lead_id] = lead
+        self._cache_lead(lead)
 
         # Persist to database
         await self._persist_lead(lead)
@@ -854,6 +923,7 @@ class RevenueAutomationEngine:
                         json.dumps(metadata)
                     )
                 logger.info(f"Lead {lead.lead_id} persisted to database")
+                self._cache_lead(lead)
             finally:
                 await conn.close()
         except Exception as e:
@@ -1115,10 +1185,10 @@ class RevenueAutomationEngine:
 
     async def qualify_lead(self, lead_id: str, qualification_data: dict[str, Any]) -> dict[str, Any]:
         """Qualify a lead with additional data"""
-        if lead_id not in self.leads:
+        lead = await self.get_lead(lead_id)
+        if not lead:
             return {"error": "Lead not found"}
-
-        lead = self.leads[lead_id]
+        self._cache_lead(lead)
 
         # Update custom fields
         lead.custom_fields.update(qualification_data)
@@ -1189,10 +1259,10 @@ class RevenueAutomationEngine:
         description: Optional[str] = None
     ) -> dict[str, Any]:
         """Create a payment link for a lead"""
-        if lead_id not in self.leads:
+        lead = await self.get_lead(lead_id)
+        if not lead:
             return {"error": "Lead not found"}
-
-        lead = self.leads[lead_id]
+        self._cache_lead(lead)
 
         # Create transaction record
         transaction_id = f"tx-{uuid.uuid4().hex[:12]}"
@@ -1211,7 +1281,7 @@ class RevenueAutomationEngine:
             metadata={"description": description}
         )
 
-        self.transactions[transaction_id] = transaction
+        self._cache_transaction(transaction)
 
         # Create real Stripe payment link
         payment_url = await self._create_stripe_payment_link(
@@ -1356,10 +1426,14 @@ class RevenueAutomationEngine:
         event_type = payload.get("type")
         transaction_id = payload.get("metadata", {}).get("transaction_id")
 
-        if not transaction_id or transaction_id not in self.transactions:
+        if not transaction_id:
             return {"error": "Transaction not found"}
-
-        transaction = self.transactions[transaction_id]
+        transaction = self.transactions.get(transaction_id)
+        if not transaction:
+            transaction = await self._fetch_transaction_from_db(transaction_id)
+            if not transaction:
+                return {"error": "Transaction not found"}
+            self._cache_transaction(transaction)
 
         if event_type == "payment_intent.succeeded":
             transaction.status = "completed"
@@ -1371,8 +1445,8 @@ class RevenueAutomationEngine:
             self.monthly_revenue += transaction.amount
 
             # Update lead status
-            if transaction.lead_id in self.leads:
-                lead = self.leads[transaction.lead_id]
+            lead = await self.get_lead(transaction.lead_id)
+            if lead:
                 lead.status = LeadStatus.WON
                 lead.converted_at = datetime.utcnow().isoformat()
                 lead.automation_history.append({
@@ -1381,6 +1455,7 @@ class RevenueAutomationEngine:
                     "amount": float(transaction.amount),
                     "timestamp": datetime.utcnow().isoformat()
                 })
+                self._cache_lead(lead)
                 await self._persist_lead(lead)
 
                 # Update pipeline value
@@ -1437,6 +1512,7 @@ class RevenueAutomationEngine:
                     tx.product_service, json.dumps(tx.metadata)
                 )
                 logger.info(f"Transaction {tx.transaction_id} persisted to database")
+                self._cache_transaction(tx)
             finally:
                 await conn.close()
         except Exception as e:
@@ -1446,36 +1522,176 @@ class RevenueAutomationEngine:
     # REVENUE METRICS
     # =========================================
 
-    def get_revenue_metrics(self) -> dict[str, Any]:
-        """Get current revenue metrics"""
-        now = datetime.utcnow()
+    def _query_metrics_from_db(self) -> Optional[dict[str, Any]]:
+        """Fetch metrics directly from SQL (no in-memory lead scan)."""
+        if not self._db_url:
+            return None
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+        except Exception as exc:
+            logger.debug("psycopg2 unavailable for metrics query: %s", exc)
+            return None
 
-        # Calculate metrics
+        stage_expr = "COALESCE(NULLIF(status, ''), NULLIF(stage, ''), 'new')"
+        value_expr = "COALESCE(estimated_value, value_estimate, expected_revenue, 0)"
+        now_iso = datetime.utcnow().isoformat()
+        conn = None
+        try:
+            connect_kwargs: dict[str, Any] = {"connect_timeout": 5}
+            if os.getenv("DB_SSLMODE"):
+                connect_kwargs["sslmode"] = os.getenv("DB_SSLMODE")
+            conn = psycopg2.connect(self._db_url, **connect_kwargs)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute(
+                f"""
+                SELECT
+                    COUNT(*)::bigint AS total_leads,
+                    COUNT(*) FILTER (WHERE {stage_expr} = 'qualified')::bigint AS qualified_leads,
+                    COUNT(*) FILTER (WHERE {stage_expr} = 'won')::bigint AS won_leads,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN {stage_expr} IN ('qualified', 'proposal_sent', 'negotiating')
+                                THEN {value_expr}
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    )::numeric AS pipeline_value
+                FROM revenue_leads
+                """
+            )
+            leads = cur.fetchone() or {}
+
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(amount), 0)::numeric AS total_revenue,
+                    COUNT(*)::bigint AS transactions_count,
+                    COALESCE(
+                        SUM(
+                            CASE
+                                WHEN COALESCE(completed_at, created_at) >= date_trunc('month', NOW())
+                                THEN amount
+                                ELSE 0
+                            END
+                        ),
+                        0
+                    )::numeric AS monthly_revenue
+                FROM revenue_transactions
+                WHERE status = 'completed'
+                """
+            )
+            transactions = cur.fetchone() or {}
+
+            cur.execute(
+                """
+                SELECT COALESCE(industry, 'generic') AS industry, COALESCE(SUM(amount), 0)::numeric AS revenue
+                FROM revenue_transactions
+                WHERE status = 'completed'
+                GROUP BY COALESCE(industry, 'generic')
+                """
+            )
+            revenue_by_industry = {
+                str(row.get("industry") or "generic"): float(row.get("revenue") or 0)
+                for row in cur.fetchall()
+            }
+
+            cur.execute(
+                f"""
+                SELECT COALESCE(source, 'unknown') AS source, COALESCE(SUM({value_expr}), 0)::numeric AS revenue
+                FROM revenue_leads
+                WHERE {stage_expr} = 'won'
+                GROUP BY COALESCE(source, 'unknown')
+                """
+            )
+            revenue_by_source = {
+                str(row.get("source") or "unknown"): float(row.get("revenue") or 0)
+                for row in cur.fetchall()
+            }
+
+            cur.execute(
+                f"""
+                SELECT {stage_expr} AS stage, COALESCE(SUM({value_expr}), 0)::numeric AS value
+                FROM revenue_leads
+                WHERE {stage_expr} IN ('new', 'qualified', 'proposal_sent', 'negotiating')
+                GROUP BY {stage_expr}
+                """
+            )
+            pipeline_by_stage = {"new": 0.0, "qualified": 0.0, "proposal": 0.0, "negotiating": 0.0}
+            for row in cur.fetchall():
+                raw_stage = str(row.get("stage") or "").strip().lower()
+                stage = "proposal" if raw_stage in {"proposal_sent", "proposal"} else raw_stage
+                if stage in pipeline_by_stage:
+                    pipeline_by_stage[stage] = float(row.get("value") or 0)
+
+            total_leads = int(leads.get("total_leads") or 0)
+            qualified_leads = int(leads.get("qualified_leads") or 0)
+            won_leads = int(leads.get("won_leads") or 0)
+            conversion_rate = (won_leads / total_leads * 100) if total_leads > 0 else 0.0
+
+            total_revenue = float(transactions.get("total_revenue") or 0)
+            monthly_revenue = float(transactions.get("monthly_revenue") or 0)
+            pipeline_value = float(leads.get("pipeline_value") or 0)
+            transactions_count = int(transactions.get("transactions_count") or 0)
+
+            # Keep scalar attributes synchronized for downstream callers that read them directly.
+            self.total_revenue = Decimal(str(total_revenue))
+            self.monthly_revenue = Decimal(str(monthly_revenue))
+            self.pipeline_value = Decimal(str(pipeline_value))
+
+            return {
+                "total_revenue": total_revenue,
+                "monthly_revenue": monthly_revenue,
+                "pipeline_value": pipeline_value,
+                "total_leads": total_leads,
+                "qualified_leads": qualified_leads,
+                "won_leads": won_leads,
+                "conversion_rate": round(conversion_rate, 2),
+                "average_deal_size": (total_revenue / won_leads) if won_leads > 0 else 0.0,
+                "revenue_by_industry": revenue_by_industry,
+                "revenue_by_source": revenue_by_source,
+                "pipeline_by_stage": pipeline_by_stage,
+                "transactions_count": transactions_count,
+                "timestamp": now_iso,
+            }
+        except Exception as exc:
+            logger.warning("SQL metrics query failed; using cache fallback: %s", exc)
+            return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _get_in_memory_metrics(self) -> dict[str, Any]:
+        """Fallback metrics when DB is unavailable."""
+        now = datetime.utcnow()
         total_leads = len(self.leads)
         qualified_leads = sum(1 for l in self.leads.values() if l.status == LeadStatus.QUALIFIED)
         won_leads = sum(1 for l in self.leads.values() if l.status == LeadStatus.WON)
         conversion_rate = (won_leads / total_leads * 100) if total_leads > 0 else 0
 
-        # Revenue by industry
-        revenue_by_industry = {}
+        revenue_by_industry: dict[str, float] = {}
         for tx in self.transactions.values():
             if tx.status == "completed":
                 ind = tx.industry.value
-                revenue_by_industry[ind] = revenue_by_industry.get(ind, 0) + float(tx.amount)
+                revenue_by_industry[ind] = revenue_by_industry.get(ind, 0.0) + float(tx.amount)
 
-        # Revenue by source
-        revenue_by_source = {}
+        revenue_by_source: dict[str, float] = {}
         for lead in self.leads.values():
             if lead.status == LeadStatus.WON:
                 source = lead.source.value
-                revenue_by_source[source] = revenue_by_source.get(source, 0) + float(lead.estimated_value)
+                revenue_by_source[source] = revenue_by_source.get(source, 0.0) + float(lead.estimated_value)
 
-        # Pipeline by stage
         pipeline_by_stage = {
             "new": sum(float(l.estimated_value) for l in self.leads.values() if l.status == LeadStatus.NEW),
             "qualified": sum(float(l.estimated_value) for l in self.leads.values() if l.status == LeadStatus.QUALIFIED),
             "proposal": sum(float(l.estimated_value) for l in self.leads.values() if l.status == LeadStatus.PROPOSAL_SENT),
-            "negotiating": sum(float(l.estimated_value) for l in self.leads.values() if l.status == LeadStatus.NEGOTIATING)
+            "negotiating": sum(float(l.estimated_value) for l in self.leads.values() if l.status == LeadStatus.NEGOTIATING),
         }
 
         return {
@@ -1491,11 +1707,125 @@ class RevenueAutomationEngine:
             "revenue_by_source": revenue_by_source,
             "pipeline_by_stage": pipeline_by_stage,
             "transactions_count": len([t for t in self.transactions.values() if t.status == "completed"]),
-            "timestamp": now.isoformat()
+            "timestamp": now.isoformat(),
         }
 
+    def get_revenue_metrics(self) -> dict[str, Any]:
+        """Get current revenue metrics (DB-backed, fallback to in-memory cache)."""
+        return self._query_metrics_from_db() or self._get_in_memory_metrics()
+
+    def _query_pipeline_dashboard_from_db(self) -> Optional[dict[str, Any]]:
+        """Build pipeline dashboard directly from DB for accuracy at scale."""
+        if not self._db_url:
+            return None
+        try:
+            import psycopg2
+            from psycopg2.extras import RealDictCursor
+        except Exception:
+            return None
+
+        stage_expr = "COALESCE(NULLIF(status, ''), NULLIF(stage, ''), 'new')"
+        value_expr = "COALESCE(estimated_value, value_estimate, expected_revenue, 0)"
+        conn = None
+        try:
+            connect_kwargs: dict[str, Any] = {"connect_timeout": 5}
+            if os.getenv("DB_SSLMODE"):
+                connect_kwargs["sslmode"] = os.getenv("DB_SSLMODE")
+            conn = psycopg2.connect(self._db_url, **connect_kwargs)
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+
+            cur.execute(
+                f"""
+                SELECT {stage_expr} AS stage, COUNT(*)::bigint AS lead_count, COALESCE(SUM({value_expr}), 0)::numeric AS value
+                FROM revenue_leads
+                GROUP BY {stage_expr}
+                """
+            )
+            summary_rows = cur.fetchall()
+
+            stages: dict[str, list[dict[str, Any]]] = {
+                "new": [],
+                "contacted": [],
+                "qualified": [],
+                "proposal_sent": [],
+                "negotiating": [],
+                "won": [],
+                "lost": [],
+            }
+            leads_by_stage = {k: 0 for k in stages}
+            value_by_stage = {k: 0.0 for k in stages}
+            for row in summary_rows:
+                stage = str(row.get("stage") or "new").strip().lower()
+                if stage not in leads_by_stage:
+                    continue
+                leads_by_stage[stage] = int(row.get("lead_count") or 0)
+                value_by_stage[stage] = float(row.get("value") or 0)
+
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(lead_id, id::text) AS lead_id,
+                    COALESCE(name, contact_name, email, 'Lead') AS name,
+                    COALESCE(company, company_name, '') AS company,
+                    {value_expr} AS value,
+                    COALESCE(score, 0) AS score,
+                    {stage_expr} AS stage,
+                    COALESCE(updated_at, created_at) AS updated_at
+                FROM revenue_leads
+                WHERE {stage_expr} IN ('new', 'contacted', 'qualified', 'proposal_sent', 'negotiating', 'won', 'lost')
+                ORDER BY COALESCE(updated_at, created_at) DESC
+                LIMIT 300
+                """
+            )
+            lead_rows = cur.fetchall()
+            for row in lead_rows:
+                stage = str(row.get("stage") or "new").strip().lower()
+                if stage not in stages:
+                    continue
+                if len(stages[stage]) >= 50:
+                    continue
+                updated_raw = row.get("updated_at")
+                updated_iso = updated_raw.isoformat() if hasattr(updated_raw, "isoformat") else str(updated_raw) if updated_raw else None
+                stages[stage].append(
+                    {
+                        "lead_id": row.get("lead_id") or "",
+                        "name": row.get("name") or "",
+                        "company": row.get("company") or "",
+                        "value": float(row.get("value") or 0),
+                        "score": int(row.get("score") or 0),
+                        "days_in_stage": self._days_since(updated_iso),
+                    }
+                )
+
+            total_pipeline_value = (
+                value_by_stage.get("qualified", 0.0)
+                + value_by_stage.get("proposal_sent", 0.0)
+                + value_by_stage.get("negotiating", 0.0)
+            )
+            self.pipeline_value = Decimal(str(total_pipeline_value))
+
+            return {
+                "stages": stages,
+                "total_pipeline_value": float(total_pipeline_value),
+                "leads_by_stage": leads_by_stage,
+                "value_by_stage": value_by_stage,
+            }
+        except Exception as exc:
+            logger.warning("SQL pipeline dashboard query failed; using cache fallback: %s", exc)
+            return None
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
     def get_pipeline_dashboard(self) -> dict[str, Any]:
-        """Get pipeline dashboard data"""
+        """Get pipeline dashboard data."""
+        db_dashboard = self._query_pipeline_dashboard_from_db()
+        if db_dashboard:
+            return db_dashboard
+
         stages = {
             "new": [],
             "contacted": [],
