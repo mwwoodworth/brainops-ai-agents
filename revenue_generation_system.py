@@ -8,11 +8,12 @@ import asyncio
 import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -135,6 +136,49 @@ async def _generate_text(
 
     logger.warning("No AI provider available for text generation")
     return ""
+
+
+def _parse_ai_json_payload(
+    raw_text: str | None,
+    *,
+    expected_type: Literal["object", "array"] | None = None,
+) -> Any | None:
+    """Parse AI output JSON robustly (handles fenced snippets and mixed text)."""
+    if not raw_text:
+        return None
+
+    text = raw_text.strip()
+    if not text:
+        return None
+
+    candidates: list[str] = [text]
+
+    for block in re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE):
+        snippet = block.strip()
+        if snippet and snippet not in candidates:
+            candidates.append(snippet)
+
+    for pattern in (r"\[[\s\S]*\]", r"\{[\s\S]*\}"):
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        snippet = match.group(0).strip()
+        if snippet and snippet not in candidates:
+            candidates.append(snippet)
+
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        if expected_type == "object" and not isinstance(parsed, dict):
+            continue
+        if expected_type == "array" and not isinstance(parsed, list):
+            continue
+        return parsed
+
+    return None
 
 # Database configuration - use config module for consistency
 # NO hardcoded credentials - all values MUST come from environment variables
@@ -341,11 +385,9 @@ class AutonomousRevenueSystem:
                 logger.warning("Empty AI response for lead identification - skipping this cycle")
                 return []
 
-            # Try to parse JSON, handling potential non-JSON responses
-            try:
-                search_params = json.loads(ai_response)
-            except json.JSONDecodeError as json_err:
-                logger.warning(f"AI returned non-JSON response for leads: {ai_response[:100]}... Error: {json_err}")
+            search_params = _parse_ai_json_payload(ai_response, expected_type="object")
+            if not isinstance(search_params, dict):
+                logger.warning("AI returned non-JSON response for leads: %s...", ai_response[:100])
                 return []
 
             # Simulate lead discovery (would integrate with real data sources)
@@ -917,34 +959,29 @@ Return ONLY valid JSON array, no other text."""
             result = advanced_ai.search_with_perplexity(discovery_prompt)
 
             if result and result.get("answer"):
-                try:
-                    answer = result["answer"]
-                    import re
-                    json_match = re.search(r'\[[\s\S]*\]', answer)
-                    if json_match:
-                        leads = json.loads(json_match.group())
-                        logger.info(f"Discovered {len(leads)} leads via Perplexity")
-                        return leads
-                except json.JSONDecodeError:
-                    logger.warning("Could not parse lead discovery response as JSON")
+                leads = _parse_ai_json_payload(result["answer"], expected_type="array")
+                if isinstance(leads, list):
+                    logger.info(f"Discovered {len(leads)} leads via Perplexity")
+                    return leads
+                logger.warning("Could not parse lead discovery response as JSON")
 
                 # Fallback: use AI to extract structured data
-                extracted = json.loads(
-                    await _generate_text(
-                        (
-                            f"Extract leads from: {result['answer']}\n\n"
-                            "Return JSON array with company_name, contact_name, email, phone, website, "
-                            "location, source, buying_signals, estimated_value, confidence_score for each lead."
-                        ),
-                        model="gpt-4-turbo-preview",
-                        system_prompt="Extract lead data from search results. Return only valid JSON array.",
-                        temperature=0.3,
-                        max_tokens=1500,
-                    )
+                extracted_response = await _generate_text(
+                    (
+                        f"Extract leads from: {result['answer']}\n\n"
+                        "Return JSON array with company_name, contact_name, email, phone, website, "
+                        "location, source, buying_signals, estimated_value, confidence_score for each lead."
+                    ),
+                    model="gpt-4-turbo-preview",
+                    system_prompt="Extract lead data from search results. Return only valid JSON array.",
+                    temperature=0.3,
+                    max_tokens=1500,
                 )
+                extracted = _parse_ai_json_payload(extracted_response, expected_type="array")
                 if isinstance(extracted, list):
                     logger.info(f"Extracted {len(extracted)} leads from discovery")
                     return extracted
+                logger.warning("Lead extraction fallback returned non-JSON payload")
 
             # Perplexity unavailable - check database for opportunities
             logger.warning("Perplexity unavailable, checking database for opportunities")
