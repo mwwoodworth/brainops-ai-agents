@@ -10,6 +10,10 @@ Tests cover:
 - ERP sync functionality
 """
 
+import json
+import sys
+import types
+
 import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -277,6 +281,62 @@ class TestLeadScoring:
         low_score = await engine._calculate_lead_score(low_value)
 
         assert high_score > low_score
+
+
+class TestLeadValueEstimation:
+    """Tests for explicit value parsing and deterministic estimation."""
+
+    @pytest.fixture
+    def engine(self):
+        return LeadDiscoveryEngine()
+
+    def test_extract_currency_values(self, engine):
+        values = engine._extract_currency_values("RFP is between $250k and 4 million this year")
+        assert 250000.0 in values
+        assert 4000000.0 in values
+
+    def test_estimate_value_prefers_explicit_amount(self, engine):
+        value = engine._estimate_discovery_value(
+            primary_text="Commercial upgrade budget approved at $1.2M",
+            signals=["intent_high"],
+            metadata={"estimated_size": "small"},
+        )
+        assert value == pytest.approx(1200000.0)
+
+    def test_estimate_value_uses_size_and_intent_fallback(self, engine):
+        value = engine._estimate_discovery_value(
+            primary_text="Needs operations workflow support",
+            signals=["intent_high"],
+            metadata={"estimated_size": "medium", "intent_level": "high"},
+        )
+        assert value > 18000
+
+    @pytest.mark.asyncio
+    async def test_web_search_uses_parsed_amount_for_estimated_value(self, engine, monkeypatch):
+        payload = [
+            {
+                "company_name": "Acme Roofing",
+                "location": "Denver, CO",
+                "website": "https://acme.example",
+                "buying_signals": ["Approved modernization budget of $4M for 2026"],
+                "estimated_size": "large",
+            }
+        ]
+
+        class _FakeAdvancedAI:
+            @staticmethod
+            def search_with_perplexity(_prompt: str):
+                return {"answer": json.dumps(payload)}
+
+        monkeypatch.setitem(
+            sys.modules,
+            "ai_advanced_providers",
+            types.SimpleNamespace(advanced_ai=_FakeAdvancedAI),
+        )
+
+        leads = await engine._discover_web_search(limit=1)
+        assert len(leads) == 1
+        assert leads[0].estimated_value == pytest.approx(4000000.0)
 
 
 class TestLeadDeduplication:
