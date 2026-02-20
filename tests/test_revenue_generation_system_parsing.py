@@ -19,6 +19,21 @@ def test_parse_ai_json_payload_extracts_array_from_mixed_text():
     assert parsed[0]["company_name"] == "Acme Roofing"
 
 
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("$4,000,000", 4_000_000.0),
+        ("900K-2.9M", 2_900_000.0),
+        ("4 million", 4_000_000.0),
+        (25000, 25000.0),
+        ("", None),
+        ("unknown", None),
+    ],
+)
+def test_coerce_value_estimate_handles_common_formats(raw_value, expected):
+    assert rgs._coerce_value_estimate(raw_value) == expected
+
+
 @pytest.mark.asyncio
 async def test_identify_new_leads_uses_fenced_json_search_params(monkeypatch):
     async def _fake_generate(*_args, **_kwargs):
@@ -138,3 +153,33 @@ async def test_store_lead_uses_upsert_on_email_conflict(monkeypatch):
     assert lead_id == "existing-lead-id"
     assert conn.committed is True
     assert "ON CONFLICT ON CONSTRAINT uq_revenue_leads_email_not_null" in conn.cursor_obj.query
+
+
+@pytest.mark.asyncio
+async def test_store_lead_sets_value_estimate_stage_and_score(monkeypatch):
+    conn = _FakeLeadConn()
+
+    def _fake_connect(**_kwargs):
+        return conn
+
+    monkeypatch.setattr(rgs.psycopg2, "connect", _fake_connect)
+
+    system = rgs.AutonomousRevenueSystem.__new__(rgs.AutonomousRevenueSystem)
+    lead_id = await system._store_lead(
+        {
+            "company_name": "Range Roofing",
+            "contact_name": "Jordan",
+            "email": "ops@range.example",
+            "estimated_value": "900K-2.9M",
+            "confidence_score": "0.82",
+            "stage": "qualified",
+            "buying_signals": ["hiring", "expansion"],
+        }
+    )
+
+    assert lead_id == "existing-lead-id"
+    assert conn.committed is True
+    params = conn.cursor_obj.params
+    assert params[7] == "qualified"
+    assert params[8] == pytest.approx(0.82)
+    assert params[9] == pytest.approx(2_900_000.0)
