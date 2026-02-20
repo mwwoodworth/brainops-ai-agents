@@ -146,6 +146,115 @@ class LeadDiscoveryEngine:
         self._initialized = False
         logger.info("LeadDiscoveryEngine initialized (tenant_id=%s)", tenant_id)
 
+    @staticmethod
+    def _normalize_money_scale(scale: str | None) -> float:
+        normalized = (scale or "").strip().lower()
+        if normalized in {"k", "thousand"}:
+            return 1_000.0
+        if normalized in {"m", "million"}:
+            return 1_000_000.0
+        if normalized in {"b", "billion"}:
+            return 1_000_000_000.0
+        return 1.0
+
+    def _extract_currency_values(self, text: str | None) -> list[float]:
+        """
+        Parse monetary values from free text.
+        Supports formats like:
+        - $4M
+        - $4,000,000
+        - 4 million
+        - 250k
+        """
+        if not text:
+            return []
+
+        values: list[float] = []
+        value_patterns = [
+            # $4M / $4,000,000 / $125k
+            re.compile(r"\$\s*(\d[\d,]*(?:\.\d+)?)\s*(k|m|b|thousand|million|billion)?\b", re.IGNORECASE),
+            # 4 million / 250k
+            re.compile(r"\b(\d[\d,]*(?:\.\d+)?)\s*(k|m|b|thousand|million|billion)\b", re.IGNORECASE),
+        ]
+
+        for pattern in value_patterns:
+            for match in pattern.finditer(text):
+                amount_raw = match.group(1)
+                scale_raw = match.group(2)
+                try:
+                    amount = float(amount_raw.replace(",", ""))
+                except Exception:
+                    continue
+                scaled = amount * self._normalize_money_scale(scale_raw)
+                if scaled > 0:
+                    values.append(scaled)
+
+        return values
+
+    def _estimate_discovery_value(
+        self,
+        *,
+        primary_text: str = "",
+        signals: list[str] | None = None,
+        metadata: Optional[dict[str, Any]] = None,
+        fallback: float = 5000.0,
+    ) -> float:
+        """
+        Estimate lead value from explicit text/metadata first, then deterministic heuristics.
+        """
+        metadata = metadata or {}
+        signals = signals or []
+        text_candidates: list[str] = [primary_text]
+
+        for key in ("post_summary", "source_detail", "description", "notes"):
+            value = metadata.get(key)
+            if isinstance(value, str):
+                text_candidates.append(value)
+
+        for signal in signals:
+            if isinstance(signal, str):
+                text_candidates.append(signal)
+
+        extracted_values: list[float] = []
+        for candidate in text_candidates:
+            extracted_values.extend(self._extract_currency_values(candidate))
+
+        if extracted_values:
+            # Prefer the largest explicit opportunity amount discovered in context.
+            return float(min(5_000_000.0, max(extracted_values)))
+
+        estimated_size = str(metadata.get("estimated_size", "")).strip().lower()
+        intent_level = str(metadata.get("intent_level", "")).strip().lower()
+        target_market = str(metadata.get("target_market", "")).strip().lower()
+
+        size_defaults = {
+            "micro": 4_000.0,
+            "small": 7_500.0,
+            "medium": 18_000.0,
+            "large": 45_000.0,
+            "enterprise": 120_000.0,
+        }
+        value = size_defaults.get(estimated_size, fallback)
+
+        if target_market in {"saas", "software", "technology", "ai"}:
+            value *= 1.75
+
+        intent_multiplier = {
+            "high": 1.35,
+            "medium": 1.15,
+            "low": 0.85,
+        }.get(intent_level, 1.0)
+        value *= intent_multiplier
+
+        signal_text = " ".join(signals).lower()
+        if any(token in signal_text for token in ("high_value", "enterprise", "premium", "urgent", "intent_high")):
+            value *= 1.2
+        if any(token in signal_text for token in ("budget", "intent_low", "price_sensitive")):
+            value *= 0.85
+
+        value = float(round(value, 2))
+        return max(1_000.0, min(5_000_000.0, value))
+
     async def _ensure_tables(self) -> None:
         """Verify required tables exist (DDL removed — agent_worker has no DDL permissions)."""
         required_tables = [
@@ -824,6 +933,7 @@ Return JSON array with up to 10 results, each containing:
 - estimated_size: string (small/medium/large)
 
 Return ONLY valid JSON array, no other text."""
+            default_industry = "roofing"
 
         try:
             result = advanced_ai.search_with_perplexity(search_prompt)
@@ -841,6 +951,25 @@ Return ONLY valid JSON array, no other text."""
                         if isinstance(signals, str):
                             signals = [signals]
 
+                        metadata = {
+                            "estimated_size": data.get("estimated_size", "unknown"),
+                            "search_source": "perplexity",
+                            "target_market": "saas" if is_saas_search else "roofing",
+                            "source_detail": "AI web research - buying signals detected",
+                        }
+                        value_context = " ".join([
+                            str(data.get("company_name", "")),
+                            str(data.get("location", "")),
+                            str(data.get("website", "")),
+                            " ".join(signals),
+                        ]).strip()
+                        estimated_value = self._estimate_discovery_value(
+                            primary_text=value_context,
+                            signals=signals,
+                            metadata=metadata,
+                            fallback=5000.0,
+                        )
+
                         lead = DiscoveredLead(
                             company_name=data.get("company_name", "Unknown"),
                             location=data.get("location", ""),
@@ -849,13 +978,9 @@ Return ONLY valid JSON array, no other text."""
                             source=LeadSource.WEB_SEARCH,
                             source_detail="AI web research - buying signals detected",
                             score=60.0,
-                            estimated_value=5000.0,
+                            estimated_value=estimated_value,
                             signals=signals,
-                            metadata={
-                                "estimated_size": data.get("estimated_size", "unknown"),
-                                "search_source": "perplexity",
-                                "target_market": "saas" if is_saas_search else "roofing"
-                            }
+                            metadata=metadata,
                         )
                         leads.append(lead)
 
@@ -915,19 +1040,39 @@ Return ONLY valid JSON array."""
                             if signal.get("company_hint"):
                                 intent = signal.get("intent_level", "medium")
                                 score = {"high": 75, "medium": 55, "low": 40}.get(intent, 55)
+                                metadata = {
+                                    "platform": signal.get("platform"),
+                                    "post_summary": signal.get("post_summary"),
+                                    "intent_level": intent,
+                                    "source_detail": signal.get("post_summary", ""),
+                                }
+                                signal_tokens = [
+                                    f"social_{signal.get('platform', 'unknown')}",
+                                    f"intent_{intent}",
+                                    keyword.replace(" ", "_"),
+                                ]
+                                value_context = " ".join(
+                                    [
+                                        str(signal.get("company_hint", "")),
+                                        str(signal.get("post_summary", "")),
+                                        keyword,
+                                    ]
+                                ).strip()
+                                estimated_value = self._estimate_discovery_value(
+                                    primary_text=value_context,
+                                    signals=signal_tokens,
+                                    metadata=metadata,
+                                    fallback=5000.0,
+                                )
 
                                 lead = DiscoveredLead(
                                     company_name=signal.get("company_hint", "Unknown"),
                                     source=LeadSource.SOCIAL_SIGNAL,
                                     source_detail=f"{signal.get('platform', 'social')} - {signal.get('post_summary', '')[:50]}",
                                     score=float(score),
-                                    estimated_value=5000.0,
-                                    signals=[f"social_{signal.get('platform', 'unknown')}", f"intent_{intent}", keyword.replace(" ", "_")],
-                                    metadata={
-                                        "platform": signal.get("platform"),
-                                        "post_summary": signal.get("post_summary"),
-                                        "intent_level": intent
-                                    }
+                                    estimated_value=estimated_value,
+                                    signals=signal_tokens,
+                                    metadata=metadata,
                                 )
                                 leads.append(lead)
 

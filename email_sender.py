@@ -131,6 +131,15 @@ def _outbound_block_reason(recipient: str, metadata: dict[str, Any] | None) -> s
     return "outbound_disabled"
 
 
+def _outbound_delivery_mode(recipient: str) -> str:
+    mode = OUTBOUND_EMAIL_MODE
+    if mode == "live":
+        return "live"
+    if mode == "allowlist" and _is_allowlisted_recipient(recipient):
+        return "allowlisted"
+    return "restricted"
+
+
 # Database configuration - supports DATABASE_URL or individual vars
 def _get_db_config():
     """Get database configuration from environment variables."""
@@ -605,6 +614,8 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                                 {
                                     "skip_reason": block_reason,
                                     "skipped_at": datetime.now(timezone.utc).isoformat(),
+                                    "outbound_mode": OUTBOUND_EMAIL_MODE,
+                                    "allowlisted_recipient": _is_allowlisted_recipient(recipient),
                                 }
                             ),
                             email_id,
@@ -645,7 +656,13 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                 success, message = send_email(recipient, subject, body, metadata)
 
             if success:
-                logger.info(f"Email {email_id} sent to {recipient}")
+                outbound_delivery_mode = _outbound_delivery_mode(recipient)
+                logger.info(
+                    "Email %s sent to %s (%s)",
+                    email_id,
+                    recipient,
+                    outbound_delivery_mode,
+                )
                 if not dry_run:
                     # Update queue status
                     cursor.execute("""
@@ -656,7 +673,16 @@ def process_email_queue(batch_size: int = None, dry_run: bool = False) -> dict[s
                             error_message = NULL,
                             metadata = metadata || %s
                         WHERE id = %s
-                    """, (json.dumps({'send_message': message, 'sent_at': datetime.now(timezone.utc).isoformat()}), email_id))
+                    """, (
+                        json.dumps({
+                            'send_message': message,
+                            'sent_at': datetime.now(timezone.utc).isoformat(),
+                            'outbound_mode': OUTBOUND_EMAIL_MODE,
+                            'outbound_delivery_mode': outbound_delivery_mode,
+                            'allowlisted_recipient': _is_allowlisted_recipient(recipient),
+                        }),
+                        email_id,
+                    ))
 
                     # Record delivery (optional - table may not exist yet)
                     try:
