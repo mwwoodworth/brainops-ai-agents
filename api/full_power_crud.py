@@ -35,6 +35,12 @@ from pydantic import BaseModel, Field
 from campaign_manager import CAMPAIGNS, campaign_to_dict, get_campaign
 from database.async_connection import DatabaseUnavailableError, get_pool, get_tenant_pool
 from utils.embedding_provider import generate_embedding_async
+from api.task_adapter import (
+    cc_row_to_taskmate,
+    to_cc_priority,
+    to_cc_status,
+    build_cc_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -201,7 +207,9 @@ class LeadBulkResult(BaseModel):
     tags=["Leads"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def create_lead_v2(payload: LeadCreate, tenant_id: str = Depends(get_tenant_id)) -> LeadResponse:
+async def create_lead_v2(
+    payload: LeadCreate, tenant_id: str = Depends(get_tenant_id)
+) -> LeadResponse:
     """Create a lead (with tenant marker stored in metadata)."""
     pool = get_pool()
     lead_id = uuid.uuid4()
@@ -352,7 +360,9 @@ async def list_leads_v2(
 
     return {
         "items": [_lead_row_to_response(r).model_dump() for r in page_rows],
-        "page": CursorPageInfo(next_cursor=next_cursor, has_more=has_more, returned=len(page_rows)).model_dump(),
+        "page": CursorPageInfo(
+            next_cursor=next_cursor, has_more=has_more, returned=len(page_rows)
+        ).model_dump(),
     }
 
 
@@ -467,7 +477,9 @@ async def archive_lead_v2(lead_id: str, tenant_id: str = Depends(get_tenant_id))
     tags=["Leads"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def bulk_leads_v2(payload: LeadBulkRequest, tenant_id: str = Depends(get_tenant_id)) -> LeadBulkResult:
+async def bulk_leads_v2(
+    payload: LeadBulkRequest, tenant_id: str = Depends(get_tenant_id)
+) -> LeadBulkResult:
     """Bulk create/update/archive leads."""
     result = LeadBulkResult()
 
@@ -741,30 +753,46 @@ class TaskDependencyRequest(BaseModel):
     tags=["Tasks"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def create_task_v2(payload: TaskCreateV2, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
-    """Create task."""
-    pool = get_tenant_pool(tenant_id)
+async def create_task_v2(
+    payload: TaskCreateV2, tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
+    """Create task in cc_tasks (canonical store)."""
+    pool = get_pool()
+    existing = await pool.fetchval(
+        "SELECT 1 FROM cc_tasks WHERE metadata->>'task_id' = $1 AND deleted_at IS NULL",
+        payload.task_id,
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Task already exists")
+
+    metadata = build_cc_metadata(task_id=payload.task_id, evidence=payload.evidence)
     row = await pool.fetchrow(
         """
-        INSERT INTO taskmate_tasks
-            (task_id, title, description, priority, status, owner, blocked_by, evidence, tenant_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid)
-        ON CONFLICT (task_id) DO NOTHING
+        INSERT INTO cc_tasks
+            (title, description, status, priority, assigned_to,
+             blocking_reason, metadata, created_by, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, NOW(), NOW())
         RETURNING *
         """,
-        payload.task_id,
         payload.title,
         payload.description,
-        payload.priority,
-        payload.status,
+        to_cc_status(payload.status),
+        to_cc_priority(payload.priority),
         payload.owner,
         payload.blocked_by,
-        payload.evidence,
-        tenant_id,
+        metadata,
+        "v2_api",
     )
-    if not row:
-        raise HTTPException(status_code=409, detail="Task already exists")
-    return dict(row)
+    return cc_row_to_taskmate(dict(row))
+
+
+def _cc_task_id_where(param_idx: int) -> str:
+    """WHERE clause to find task by taskmate task_id in cc_tasks."""
+    return (
+        f"(metadata->>'task_id' = ${param_idx} "
+        f"OR metadata->>'source_id' = ${param_idx} "
+        f"OR id::text = ${param_idx})"
+    )
 
 
 @router.get(
@@ -780,34 +808,34 @@ async def list_tasks_v2(
     limit: int = Query(default=50, ge=1, le=200),
     cursor: Optional[str] = Query(default=None),
 ) -> dict[str, Any]:
-    """List tasks with cursor pagination."""
-    pool = get_tenant_pool(tenant_id)
-    where = ["tenant_id = $1::uuid"]
-    params: list[Any] = [tenant_id]
+    """List tasks from cc_tasks with cursor pagination."""
+    pool = get_pool()
+    where = ["deleted_at IS NULL"]
+    params: list[Any] = []
 
     if status:
-        params.append(status)
+        params.append(to_cc_status(status))
         where.append(f"status = ${len(params)}")
     if owner:
         params.append(owner)
-        where.append(f"owner = ${len(params)}")
+        where.append(f"assigned_to = ${len(params)}")
     if priority:
-        params.append(priority)
+        params.append(to_cc_priority(priority))
         where.append(f"priority = ${len(params)}")
 
     cursor_data = _cursor_decode(cursor)
-    if cursor_data and cursor_data.get("created_at") and cursor_data.get("task_id"):
+    if cursor_data and cursor_data.get("created_at") and cursor_data.get("id"):
         params.append(datetime.fromisoformat(cursor_data["created_at"]))
-        params.append(cursor_data["task_id"])
-        where.append(f"(created_at, task_id) < (${len(params)-1}, ${len(params)})")
+        params.append(cursor_data["id"])
+        where.append(f"(created_at, id::text) < (${len(params)-1}, ${len(params)})")
 
     params.append(limit + 1)
     rows = await pool.fetch(
         f"""
         SELECT *
-        FROM taskmate_tasks
+        FROM cc_tasks
         WHERE {' AND '.join(where)}
-        ORDER BY created_at DESC, task_id DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ${len(params)}
         """,
         *params,
@@ -817,17 +845,19 @@ async def list_tasks_v2(
     page_rows = rows[:limit]
     next_cursor = None
     if has_more and page_rows:
-        tail = page_rows[-1]
+        tail = dict(page_rows[-1])
         next_cursor = _cursor_encode(
             {
                 "created_at": _row_datetime_iso(tail.get("created_at")),
-                "task_id": tail.get("task_id"),
+                "id": str(tail.get("id", "")),
             }
         )
 
     return {
-        "items": [dict(r) for r in page_rows],
-        "page": CursorPageInfo(next_cursor=next_cursor, has_more=has_more, returned=len(page_rows)).model_dump(),
+        "items": [cc_row_to_taskmate(dict(r)) for r in page_rows],
+        "page": CursorPageInfo(
+            next_cursor=next_cursor, has_more=has_more, returned=len(page_rows)
+        ).model_dump(),
     }
 
 
@@ -837,22 +867,21 @@ async def list_tasks_v2(
     dependencies=[Depends(require_feature_enabled)],
 )
 async def get_task_v2(task_id: str, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
-    """Read one task and comments."""
-    pool = get_tenant_pool(tenant_id)
+    """Read one task and comments from cc_tasks."""
+    pool = get_pool()
+    where = _cc_task_id_where(1)
     task = await pool.fetchrow(
-        "SELECT * FROM taskmate_tasks WHERE task_id = $1 AND tenant_id = $2::uuid",
+        f"SELECT * FROM cc_tasks WHERE {where} AND deleted_at IS NULL",
         task_id,
-        tenant_id,
     )
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
     comments = await pool.fetch(
-        "SELECT id, author, body, created_at FROM taskmate_comments WHERE task_id = $1 AND tenant_id = $2::uuid ORDER BY created_at",
+        "SELECT id, author, body, created_at FROM taskmate_comments WHERE task_id = $1 ORDER BY created_at",
         task_id,
-        tenant_id,
     )
-    return {"task": dict(task), "comments": [dict(c) for c in comments]}
+    return {"task": cc_row_to_taskmate(dict(task)), "comments": [dict(c) for c in comments]}
 
 
 @router.patch(
@@ -865,31 +894,58 @@ async def update_task_v2(
     patch: TaskPatchV2,
     tenant_id: str = Depends(get_tenant_id),
 ) -> dict[str, Any]:
-    """Update task fields."""
-    pool = get_tenant_pool(tenant_id)
+    """Update task fields in cc_tasks."""
+    pool = get_pool()
     updates = _model_dump(patch)
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    # Map taskmate field names → cc_tasks column names
+    _field_map = {
+        "title": "title",
+        "description": "description",
+        "priority": "priority",
+        "status": "status",
+        "owner": "assigned_to",
+        "blocked_by": "blocking_reason",
+    }
+
     sets: list[str] = ["updated_at = NOW()"]
     args: list[Any] = []
     for key, value in updates.items():
-        args.append(value)
-        sets.append(f"{key} = ${len(args)}")
+        if key == "evidence":
+            args.append(json.dumps(value))
+            sets.append(
+                f"metadata = jsonb_set(COALESCE(metadata, '{{}}'::jsonb), '{{evidence}}', ${len(args)}::jsonb)"
+            )
+        elif key == "priority":
+            args.append(to_cc_priority(value))
+            sets.append(f"priority = ${len(args)}")
+        elif key == "status":
+            cc_status = to_cc_status(value)
+            args.append(cc_status)
+            sets.append(f"status = ${len(args)}")
+            if value == "closed":
+                args.append(datetime.now(timezone.utc))
+                sets.append(f"completed_date = ${len(args)}")
+        elif key in _field_map:
+            args.append(value)
+            sets.append(f"{_field_map[key]} = ${len(args)}")
 
-    args.extend([task_id, tenant_id])
+    args.append(task_id)
+    where = _cc_task_id_where(len(args))
     row = await pool.fetchrow(
         f"""
-        UPDATE taskmate_tasks
+        UPDATE cc_tasks
         SET {', '.join(sets)}
-        WHERE task_id = ${len(args)-1} AND tenant_id = ${len(args)}::uuid
+        WHERE {where} AND deleted_at IS NULL
         RETURNING *
         """,
         *args,
     )
     if not row:
         raise HTTPException(status_code=404, detail="Task not found")
-    return dict(row)
+    return cc_row_to_taskmate(dict(row))
 
 
 @router.post(
@@ -1010,7 +1066,9 @@ async def get_agent_execution_v2(execution_id: str) -> dict[str, Any]:
     tags=["Agent Executions"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def retry_agent_execution_v2(execution_id: str, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
+async def retry_agent_execution_v2(
+    execution_id: str, tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
     """Queue execution retry request."""
     pool = get_pool()
     execution_uuid = _ensure_uuid(execution_id, "execution_id")
@@ -1090,11 +1148,17 @@ class MemoryMetadataPatchV2(BaseModel):
     tags=["Memories"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def create_memory_v2(payload: MemoryCreateV2, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
+async def create_memory_v2(
+    payload: MemoryCreateV2, tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
     """Create memory entry."""
     pool = get_tenant_pool(tenant_id)
-    content_json = payload.content if isinstance(payload.content, dict) else {"text": payload.content}
-    content_text = payload.content if isinstance(payload.content, str) else json.dumps(payload.content)
+    content_json = (
+        payload.content if isinstance(payload.content, dict) else {"text": payload.content}
+    )
+    content_text = (
+        payload.content if isinstance(payload.content, str) else json.dumps(payload.content)
+    )
 
     embedding = await generate_embedding_async(content_text, log=logger)
     embedding_str = f"[{','.join(map(str, embedding))}]" if embedding else None
@@ -1244,7 +1308,9 @@ async def patch_memory_metadata_v2(
     tags=["Memories"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def archive_memory_v2(memory_id: str, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
+async def archive_memory_v2(
+    memory_id: str, tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
     """Archive memory by setting expires_at and metadata flag."""
     pool = get_tenant_pool(tenant_id)
     memory_uuid = _ensure_uuid(memory_id, "memory_id")
@@ -1262,7 +1328,11 @@ async def archive_memory_v2(memory_id: str, tenant_id: str = Depends(get_tenant_
     )
     if not row:
         raise HTTPException(status_code=404, detail="Memory not found")
-    return {"success": True, "id": row["id"], "archived_at": _row_datetime_iso(row.get("expires_at"))}
+    return {
+        "success": True,
+        "id": row["id"],
+        "archived_at": _row_datetime_iso(row.get("expires_at")),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1332,7 +1402,9 @@ async def create_workflow_v2(payload: WorkflowCreateV2) -> dict[str, Any]:
     tags=["Workflows"],
     dependencies=[Depends(require_feature_enabled)],
 )
-async def list_workflows_v2(active_only: bool = True, limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+async def list_workflows_v2(
+    active_only: bool = True, limit: int = Query(default=100, ge=1, le=500)
+) -> dict[str, Any]:
     """List workflows."""
     pool = get_pool()
     rows = await pool.fetch(
@@ -1478,7 +1550,9 @@ async def resume_workflow_execution_v2(execution_id: str) -> dict[str, Any]:
     tags=["Workflows"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def clone_workflow_v2(workflow_id: str, suffix: str = Query(default="clone")) -> dict[str, Any]:
+async def clone_workflow_v2(
+    workflow_id: str, suffix: str = Query(default="clone")
+) -> dict[str, Any]:
     """Clone workflow definition."""
     pool = get_pool()
     workflow_uuid = _ensure_uuid(workflow_id, "workflow_id")
@@ -1531,7 +1605,9 @@ class AlertCreateV2(BaseModel):
     tags=["Alerts"],
     dependencies=[Depends(require_feature_enabled), Depends(WRITE_LIMIT)],
 )
-async def create_alert_v2(payload: AlertCreateV2, tenant_id: str = Depends(get_tenant_id)) -> dict[str, Any]:
+async def create_alert_v2(
+    payload: AlertCreateV2, tenant_id: str = Depends(get_tenant_id)
+) -> dict[str, Any]:
     """Create alert."""
     pool = get_tenant_pool(tenant_id)
     alert_payload = {
@@ -1684,7 +1760,9 @@ async def escalate_alert_v2(
     return dict(row)
 
 
-async def _update_alert_state(alert_id: str, tenant_id: str, state: str, actor: str) -> dict[str, Any]:
+async def _update_alert_state(
+    alert_id: str, tenant_id: str, state: str, actor: str
+) -> dict[str, Any]:
     pool = get_tenant_pool(tenant_id)
     alert_uuid = _ensure_uuid(alert_id, "alert_id")
     row = await pool.fetchrow(
@@ -1768,8 +1846,13 @@ async def list_brain_logs_v2(
                 or (data.get("data") or {}).get("level")
                 or "info"
             ),
-            "module": data.get("module") or data.get("system") or data.get("logger") or data.get("action"),
-            "message": data.get("message") or (data.get("data") or {}).get("message") or json.dumps(data),
+            "module": data.get("module")
+            or data.get("system")
+            or data.get("logger")
+            or data.get("action"),
+            "message": data.get("message")
+            or (data.get("data") or {}).get("message")
+            or json.dumps(data),
             "raw": data,
         }
 
@@ -1845,7 +1928,9 @@ def _lead_row_to_response(row: Any) -> LeadResponse:
         website=data.get("website"),
         stage=data.get("stage"),
         score=float(data.get("score") or 0.0) if data.get("score") is not None else None,
-        value_estimate=float(data.get("value_estimate") or 0.0) if data.get("value_estimate") is not None else None,
+        value_estimate=float(data.get("value_estimate") or 0.0)
+        if data.get("value_estimate") is not None
+        else None,
         source=data.get("source"),
         metadata=metadata,
         created_at=_row_datetime_iso(data.get("created_at")),
