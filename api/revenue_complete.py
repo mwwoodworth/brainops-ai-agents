@@ -460,8 +460,22 @@ async def revenue_dashboard(days: int = 30):
     # Use timezone-naive datetime for compatibility with various table schemas
     since = datetime.utcnow() - timedelta(days=days)
 
+    missing_streams: list[str] = []
+    warnings: list[str] = []
+
+    async def safe_fetchrow(stream_name: str, query: str, *params: Any) -> Optional[Any]:
+        try:
+            return await pool.fetchrow(query, *params)
+        except Exception as exc:
+            missing_streams.append(stream_name)
+            warnings.append(f"{stream_name}:{type(exc).__name__}")
+            logger.warning("Revenue dashboard query failed for %s: %s", stream_name, exc)
+            return None
+
     # Gumroad sales (excluding test)
-    gumroad = await pool.fetchrow("""
+    gumroad = await safe_fetchrow(
+        "gumroad",
+        """
         SELECT
             COUNT(*) as total_sales,
             COALESCE(SUM(price), 0) as total_revenue,
@@ -469,10 +483,14 @@ async def revenue_dashboard(days: int = 30):
         FROM gumroad_sales
         WHERE sale_timestamp >= $1 AND is_test = false
           AND email NOT LIKE '%test%' AND email NOT LIKE '%example%'
-    """, since)
+        """,
+        since,
+    )
 
     # Stripe revenue
-    stripe = await pool.fetchrow("""
+    stripe = await safe_fetchrow(
+        "stripe",
+        """
         SELECT
             COUNT(*) as total_charges,
             COALESCE(SUM(amount_cents), 0) as total_cents
@@ -480,10 +498,14 @@ async def revenue_dashboard(days: int = 30):
         WHERE created_at >= $1
           AND event_type IN ('charge.succeeded', 'checkout.session.completed')
           AND COALESCE((metadata->>'livemode')::boolean, false) = true
-    """, since)
+        """,
+        since,
+    )
 
     # Lead pipeline
-    leads = await pool.fetchrow("""
+    leads = await safe_fetchrow(
+        "lead_pipeline",
+        """
         SELECT
             COUNT(*) as total_leads,
             SUM(CASE WHEN stage = 'new' THEN 1 ELSE 0 END) as new_leads,
@@ -495,42 +517,56 @@ async def revenue_dashboard(days: int = 30):
         WHERE created_at >= $1
           AND COALESCE(is_test, FALSE) = FALSE
           AND COALESCE(is_demo, FALSE) = FALSE
-    """, since)
+        """,
+        since,
+    )
 
     # Email campaign performance
-    emails = await pool.fetchrow("""
+    emails = await safe_fetchrow(
+        "email_campaigns",
+        """
         SELECT
             COUNT(*) as total_sent,
             SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as delivered,
             SUM(CASE WHEN status = 'opened' THEN 1 ELSE 0 END) as opened
         FROM ai_email_queue
         WHERE created_at >= $1
-    """, since)
+        """,
+        since,
+    )
 
     # Agent executions (cast to timestamp for tz compatibility)
-    agents = await pool.fetchrow("""
+    agents = await safe_fetchrow(
+        "agent_activity",
+        """
         SELECT
             COUNT(*) as total_executions,
             COUNT(DISTINCT agent_type) as unique_agents
         FROM agent_executions
         WHERE created_at >= $1::timestamp
-    """, since)
+        """,
+        since,
+    )
 
     # API usage (note: api_usage uses timestamp, not created_at, and has no cost_cents)
-    api = await pool.fetchrow("""
+    api = await safe_fetchrow(
+        "api_monetization",
+        """
         SELECT
             COUNT(*) as total_calls,
             COUNT(DISTINCT api_key_id) as unique_keys,
             0 as total_revenue_cents
         FROM api_usage
         WHERE timestamp >= $1
-    """, since)
+        """,
+        since,
+    )
 
     # Calculate totals
     total_revenue = (
-        float(gumroad["total_revenue"] or 0) +
-        float(stripe["total_cents"] or 0) / 100 +
-        float(api["total_revenue_cents"] or 0) / 100
+        float((gumroad or {}).get("total_revenue") or 0) +
+        float((stripe or {}).get("total_cents") or 0) / 100 +
+        float((api or {}).get("total_revenue_cents") or 0) / 100
     )
 
     return {
@@ -539,42 +575,45 @@ async def revenue_dashboard(days: int = 30):
         "total_revenue": total_revenue,
         "revenue_breakdown": {
             "gumroad": {
-                "sales": gumroad["total_sales"] or 0,
-                "revenue": float(gumroad["total_revenue"] or 0),
-                "customers": gumroad["unique_customers"] or 0
+                "sales": (gumroad or {}).get("total_sales") or 0,
+                "revenue": float((gumroad or {}).get("total_revenue") or 0),
+                "customers": (gumroad or {}).get("unique_customers") or 0
             },
             "stripe": {
-                "charges": stripe["total_charges"] or 0,
-                "revenue": float(stripe["total_cents"] or 0) / 100
+                "charges": (stripe or {}).get("total_charges") or 0,
+                "revenue": float((stripe or {}).get("total_cents") or 0) / 100
             },
             "api_monetization": {
-                "calls": api["total_calls"] or 0,
-                "revenue": float(api["total_revenue_cents"] or 0) / 100,
-                "active_keys": api["unique_keys"] or 0
+                "calls": (api or {}).get("total_calls") or 0,
+                "revenue": float((api or {}).get("total_revenue_cents") or 0) / 100,
+                "active_keys": (api or {}).get("unique_keys") or 0
             }
         },
         "lead_pipeline": {
-            "total": leads["total_leads"] or 0,
-            "new": leads["new_leads"] or 0,
-            "contacted": leads["contacted"] or 0,
-            "qualified": leads["qualified"] or 0,
-            "won": leads["won"] or 0,
-            "won_value": float(leads["won_value"] or 0),
-            "conversion_rate": (leads["won"] or 0) / max(1, leads["total_leads"] or 1) * 100
+            "total": (leads or {}).get("total_leads") or 0,
+            "new": (leads or {}).get("new_leads") or 0,
+            "contacted": (leads or {}).get("contacted") or 0,
+            "qualified": (leads or {}).get("qualified") or 0,
+            "won": (leads or {}).get("won") or 0,
+            "won_value": float((leads or {}).get("won_value") or 0),
+            "conversion_rate": ((leads or {}).get("won") or 0) / max(1, (leads or {}).get("total_leads") or 1) * 100
         },
         "email_campaigns": {
-            "sent": emails["total_sent"] or 0,
-            "delivered": emails["delivered"] or 0,
-            "opened": emails["opened"] or 0,
-            "open_rate": (emails["opened"] or 0) / max(1, emails["delivered"] or 1) * 100
+            "sent": (emails or {}).get("total_sent") or 0,
+            "delivered": (emails or {}).get("delivered") or 0,
+            "opened": (emails or {}).get("opened") or 0,
+            "open_rate": ((emails or {}).get("opened") or 0) / max(1, (emails or {}).get("delivered") or 1) * 100
         },
         "agent_activity": {
-            "executions": agents["total_executions"] or 0,
-            "unique_agents": agents["unique_agents"] or 0
+            "executions": (agents or {}).get("total_executions") or 0,
+            "unique_agents": (agents or {}).get("unique_agents") or 0
         },
         "health": {
-            "all_streams_active": True,
-            "database_connected": True
+            "status": "healthy" if not missing_streams else "degraded",
+            "all_streams_active": len(missing_streams) == 0,
+            "database_connected": True,
+            "missing_streams": missing_streams,
+            "warnings": warnings,
         },
         "generated_at": datetime.now(timezone.utc).isoformat()
     }

@@ -79,6 +79,9 @@ TEST_EMAIL_TOKENS = ("@example.", "@test.", "@demo.", "@invalid.")
 TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com")
 
 OUTBOUND_EMAIL_MODE = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
+OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE = (
+    os.getenv("OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE", "true").strip().lower() == "true"
+)
 
 
 def _parse_csv_env(value: str | None) -> set[str]:
@@ -116,6 +119,8 @@ def _outbound_block_reason(recipient: str, metadata: dict[str, Any] | None) -> s
     """
     mode = OUTBOUND_EMAIL_MODE
     if mode == "live":
+        if OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE and not _is_allowlisted_recipient(recipient):
+            return "not_allowlisted"
         return None
 
     if _is_allowlisted_recipient(recipient):
@@ -134,6 +139,8 @@ def _outbound_block_reason(recipient: str, metadata: dict[str, Any] | None) -> s
 def _outbound_delivery_mode(recipient: str) -> str:
     mode = OUTBOUND_EMAIL_MODE
     if mode == "live":
+        if OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE:
+            return "allowlisted" if _is_allowlisted_recipient(recipient) else "restricted"
         return "live"
     if mode == "allowlist" and _is_allowlisted_recipient(recipient):
         return "allowlisted"
