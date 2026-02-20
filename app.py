@@ -3582,7 +3582,10 @@ async def system_awareness():
         # Check memory activity
         memories_today = await pool.fetchval(
             """
-            SELECT COUNT(*) FROM unified_ai_memory WHERE created_at::date = CURRENT_DATE
+            SELECT COUNT(*)
+            FROM unified_ai_memory
+            WHERE created_at >= CURRENT_DATE::timestamp
+              AND created_at < (CURRENT_DATE + INTERVAL '1 day')::timestamp
         """
         )
         if memories_today < 50:
