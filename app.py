@@ -3102,6 +3102,15 @@ def _is_allowlisted_recipient(recipient: str | None) -> bool:
     return any(domain.endswith(f".{allowed}") for allowed in allowlist_domains)
 
 
+def _require_allowlist_in_live_mode() -> bool:
+    return (
+        os.getenv("OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE", "true")
+        .strip()
+        .lower()
+        == "true"
+    )
+
+
 class SendEmailPayload(BaseModel):
     recipient: EmailStr
     subject: str
@@ -3116,11 +3125,13 @@ async def send_email_endpoint(
 ):
     """Send a one-off email (admin-only, API-key protected).
 
-    Safety rail: unless OUTBOUND_EMAIL_MODE=live, the recipient must be allowlisted
-    via OUTBOUND_EMAIL_ALLOWLIST / OUTBOUND_EMAIL_ALLOWLIST_DOMAINS.
+    Safety rail:
+    - non-live modes always require allowlist
+    - live mode requires allowlist unless OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE=false
     """
     mode = os.getenv("OUTBOUND_EMAIL_MODE", "disabled").strip().lower()
-    if mode != "live" and not _is_allowlisted_recipient(payload.recipient):
+    require_allowlist = mode != "live" or _require_allowlist_in_live_mode()
+    if require_allowlist and not _is_allowlisted_recipient(payload.recipient):
         raise HTTPException(
             status_code=403, detail="Recipient is not allowlisted for outbound email"
         )
