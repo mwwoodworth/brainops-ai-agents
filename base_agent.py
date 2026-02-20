@@ -1,6 +1,7 @@
 import logging
 import uuid
 import json
+import os
 from typing import Any, Dict
 from datetime import datetime
 from database.async_connection import get_pool
@@ -21,6 +22,11 @@ class BaseAgent:
     async def log_execution(self, task: dict, result: dict):
         """Log execution to database and Unified Brain"""
         exec_id = str(uuid.uuid4())
+        tenant_id = str(
+            task.get("tenant_id")
+            or os.getenv("DEFAULT_TENANT_ID")
+            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+        )
 
         # 1. Log to legacy table (keep for backward compatibility)
         try:
@@ -28,13 +34,14 @@ class BaseAgent:
             await pool.execute("""
                 INSERT INTO agent_executions (
                     id, task_execution_id, agent_type, prompt,
-                    response, status, created_at, completed_at
+                    response, status, created_at, completed_at, tenant_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW(), $7::uuid)
             """,
                 exec_id, exec_id, self.type,
                 json.dumps(task), json.dumps(result),
-                result.get('status', 'completed')
+                result.get('status', 'completed'),
+                tenant_id,
             )
         except Exception as e:
             self.logger.error(f"Legacy logging failed: {e}")

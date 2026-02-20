@@ -355,12 +355,19 @@ class AgentExecutionLogger:
     """
 
     def __init__(
-        self, agent_name: str, agent_id: str, task_id: str, execution_id: Optional[str] = None
+        self,
+        agent_name: str,
+        agent_id: str,
+        task_id: str,
+        execution_id: Optional[str] = None,
+        tenant_id: Optional[str] = None,
     ):
         self.agent_name = agent_name
         self.agent_id = agent_id
         self.task_id = task_id
         self.execution_id = execution_id or task_id
+        default_tenant = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+        self.tenant_id = str(tenant_id or default_tenant)
         self.memory_operations: list[dict[str, Any]] = []
         self._phase_start_times: dict[str, datetime] = {}
         self._logger = logging.getLogger(__name__)
@@ -378,8 +385,8 @@ class AgentExecutionLogger:
                 """
                 INSERT INTO agent_execution_logs (
                     agent_name, agent_id, task_id, execution_phase,
-                    phase_data, duration_ms, memory_operations, timestamp
-                ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, NOW())
+                    phase_data, duration_ms, memory_operations, timestamp, tenant_id
+                ) VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, NOW(), $8::uuid)
             """,
                 self.agent_name,
                 self.agent_id,
@@ -388,6 +395,7 @@ class AgentExecutionLogger:
                 json.dumps(phase_data or {}, default=str),
                 duration_ms,
                 json.dumps(self.memory_operations, default=str),
+                self.tenant_id,
             )
             self._logger.debug(f"Logged phase '{phase}' for task {self.task_id}")
         except Exception as e:
@@ -2192,13 +2200,14 @@ class AgentExecutor:
         """Persist execution start to ai_agent_executions for tracking."""
         correlation_id = task.get("correlation_id") or str(uuid.uuid4())
         task["correlation_id"] = correlation_id
+        tenant_id = self._resolve_tenant_for_task(task)
         try:
             pool = get_pool()
             await pool.execute(
                 """
                 INSERT INTO ai_agent_executions
-                    (id, agent_name, task_type, input_data, status, correlation_id)
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+                    (id, agent_name, task_type, input_data, status, correlation_id, tenant_id)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7::uuid)
                 ON CONFLICT (id) DO NOTHING
             """,
                 execution_id,
@@ -2207,6 +2216,7 @@ class AgentExecutor:
                 json.dumps(task, default=str),
                 "running",
                 correlation_id,
+                tenant_id,
             )
             # Emit context event: agent_started
             await self._emit_context_event(
@@ -2217,7 +2227,7 @@ class AgentExecutor:
                 agent_name,
                 "agent_started",
                 {"task_type": task_type, "execution_id": execution_id},
-                task.get("tenant_id"),
+                tenant_id,
             )
         except Exception as e:
             logger.warning(f"Failed to log execution start to ai_agent_executions: {e!r}")
@@ -2328,21 +2338,23 @@ class AgentExecutor:
     ) -> None:
         """Persist execution completion to ai_agent_executions."""
         correlation_id = task.get("correlation_id", "")
+        tenant_id = self._resolve_tenant_for_task(task)
         try:
             pool = get_pool()
             await pool.execute(
                 """
                 INSERT INTO ai_agent_executions (
                     id, agent_name, task_type, input_data, status,
-                    output_data, execution_time_ms, error_message, correlation_id
+                    output_data, execution_time_ms, error_message, correlation_id, tenant_id
                 )
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7, $8, $9, $10::uuid)
                 ON CONFLICT (id) DO UPDATE SET
                     status = EXCLUDED.status,
                     output_data = EXCLUDED.output_data,
                     execution_time_ms = EXCLUDED.execution_time_ms,
                     error_message = EXCLUDED.error_message,
-                    correlation_id = EXCLUDED.correlation_id
+                    correlation_id = EXCLUDED.correlation_id,
+                    tenant_id = COALESCE(ai_agent_executions.tenant_id, EXCLUDED.tenant_id)
             """,
                 execution_id,
                 agent_name,
@@ -2353,6 +2365,7 @@ class AgentExecutor:
                 int(duration_ms) if duration_ms is not None else None,
                 error_message,
                 correlation_id,
+                tenant_id,
             )
             # Emit context event: agent_completed or agent_failed
             event_type = "agent_completed" if status == "completed" else "agent_failed"
@@ -2368,7 +2381,7 @@ class AgentExecutor:
                     "duration_ms": int(duration_ms) if duration_ms else 0,
                     "error": error_message,
                 },
-                task.get("tenant_id"),
+                tenant_id,
             )
             self._update_agent_benchmark_cache(agent_name, status, duration_ms, result)
         except Exception as e:
@@ -2582,7 +2595,13 @@ class AgentExecutor:
         execution_start = datetime.now(timezone.utc)
 
         # Initialize detailed execution logger
-        exec_logger = AgentExecutionLogger(agent_name, agent_id, task_id, execution_id=execution_id)
+        exec_logger = AgentExecutionLogger(
+            agent_name,
+            agent_id,
+            task_id,
+            execution_id=execution_id,
+            tenant_id=self._resolve_tenant_for_task(task),
+        )
         # Support clients (e.g. /ai/analyze) that pass parameters under task["data"].
         # Flatten missing keys into the top-level task for compatibility with existing agents.
         task_data = task.get("data")

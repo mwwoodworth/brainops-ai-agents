@@ -648,6 +648,11 @@ async def get_revenue_analytics():
 @router.post("/activate-all")
 async def activate_all_streams(background_tasks: BackgroundTasks):
     """Quick action to activate all income streams"""
+    tenant_id = (
+        os.getenv("DEFAULT_TENANT_ID")
+        or os.getenv("TENANT_ID")
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
 
     results = {
         "timestamp": datetime.utcnow().isoformat(),
@@ -673,14 +678,15 @@ async def activate_all_streams(background_tasks: BackgroundTasks):
         await pool.execute(
             """
             INSERT INTO ai_agent_executions (
-                agent_name, task_type, input_data, output_data, status, created_at
-            ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, NOW())
+                agent_name, task_type, input_data, output_data, status, created_at, tenant_id
+            ) VALUES ($1, $2, $3::jsonb, $4::jsonb, $5, NOW(), $6::uuid)
             """,
             "income_stream_activator",
             "activate_all_streams",
             json.dumps({"source": "income_streams.activate_all"}),
             json.dumps(results, default=str),
             "completed",
+            tenant_id,
         )
     except Exception as e:
         logger.warning(f"Could not log activation: {e}")

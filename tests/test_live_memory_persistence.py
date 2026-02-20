@@ -1,4 +1,5 @@
 import sys
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -91,6 +92,7 @@ async def test_persist_memory_coerces_predictions_to_text_array():
     predictions_param = cursor.last_params[11]
     contradictions_param = cursor.last_params[12]
     connections_param = cursor.last_params[9]
+    tenant_param = cursor.last_params[14]
 
     assert isinstance(predictions_param, list)
     assert predictions_param and isinstance(predictions_param[0], str)
@@ -100,6 +102,7 @@ async def test_persist_memory_coerces_predictions_to_text_array():
 
     assert isinstance(connections_param, list)
     assert connections_param == []
+    assert str(uuid.UUID(str(tenant_param))) == str(tenant_param)
 
 
 @pytest.mark.asyncio
@@ -131,7 +134,8 @@ async def test_persist_memory_handles_json_string_predictions():
     assert cursor.last_params is not None
     predictions_param = cursor.last_params[11]
     contradictions_param = cursor.last_params[12]
+    tenant_param = cursor.last_params[14]
 
     assert predictions_param == []
     assert contradictions_param == []
-
+    assert str(uuid.UUID(str(tenant_param))) == str(tenant_param)

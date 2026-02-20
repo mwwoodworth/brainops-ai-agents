@@ -4489,6 +4489,12 @@ async def execute_agent(
 ):
     """Execute an agent"""
     pool = get_pool()
+    tenant_uuid = (
+        _resolve_tenant_uuid_from_request(request)
+        or config.tenant.default_tenant_id
+        or os.getenv("DEFAULT_TENANT_ID")
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
 
     try:
         # Resolve agent aliases before database lookup (ERP compatibility)
@@ -4527,14 +4533,16 @@ async def execute_agent(
         try:
             await pool.execute(
                 """
-                INSERT INTO ai_agent_executions (id, agent_name, task_type, input_data, status)
-                VALUES ($1, $2, $3, $4, $5)
+                INSERT INTO ai_agent_executions
+                    (id, agent_name, task_type, input_data, status, tenant_id)
+                VALUES ($1, $2, $3, $4, $5, $6::uuid)
             """,
                 execution_id,
                 agent_name,
                 "execute",
                 json.dumps(body),
                 "running",
+                tenant_uuid,
             )
             logger.info(f"✅ Logged execution start for {agent_name}: {execution_id}")
         except Exception as insert_error:
@@ -4931,6 +4939,12 @@ async def execute_scheduled_agents(request: Request, authenticated: bool = Depen
 
     try:
         pool = get_pool()
+        tenant_uuid = (
+            _resolve_tenant_uuid_from_request(request)
+            or config.tenant.default_tenant_id
+            or os.getenv("DEFAULT_TENANT_ID")
+            or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+        )
 
         # Get current hour
         current_hour = datetime.utcnow().hour
@@ -4987,13 +5001,14 @@ async def execute_scheduled_agents(request: Request, authenticated: bool = Depen
                 # Log execution start - task_execution_id is NULL for scheduled executions
                 await pool.execute(
                     """
-                    INSERT INTO agent_executions (id, agent_type, status, prompt)
-                    VALUES ($1, $2, $3, $4)
+                    INSERT INTO agent_executions (id, agent_type, status, prompt, tenant_id)
+                    VALUES ($1, $2, $3, $4, $5::uuid)
                 """,
                     execution_id,
                     agent.get("type", "scheduled"),
                     "running",
                     json.dumps({"scheduled": True, "agent_name": agent_name}),
+                    tenant_uuid,
                 )
 
                 # ACTUALLY EXECUTE THE AGENT using AgentExecutor
@@ -5573,6 +5588,12 @@ async def execute_agent_generic(
     pool = get_pool()
     execution_id = str(uuid.uuid4())
     started_at = datetime.utcnow()
+    tenant_uuid = (
+        _resolve_tenant_uuid_from_request(request)
+        or config.tenant.default_tenant_id
+        or os.getenv("DEFAULT_TENANT_ID")
+        or "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+    )
 
     try:
         # Find a matching active agent by type (no 'description' column in agents table)
@@ -5605,14 +5626,16 @@ async def execute_agent_generic(
         # Log execution start (use correct column names: task_type, no agent_id or started_at)
         await pool.execute(
             """
-            INSERT INTO ai_agent_executions (id, agent_name, task_type, status, input_data, created_at)
-            VALUES ($1, $2, $3, 'running', $4, $5)
+            INSERT INTO ai_agent_executions
+                (id, agent_name, task_type, status, input_data, created_at, tenant_id)
+            VALUES ($1, $2, $3, 'running', $4, $5, $6::uuid)
         """,
             execution_id,
             agent_name,
             agent_type,
             json.dumps({"type": agent_type, "task": task, "parameters": parameters}),
             started_at,
+            tenant_uuid,
         )
 
         execution_status = "completed"

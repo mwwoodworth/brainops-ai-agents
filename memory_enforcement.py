@@ -354,7 +354,11 @@ class MemoryEnforcementEngine:
             expires_at = datetime.utcnow() + timedelta(days=expiry_days.get(proof.evidence_level, 7))
 
             # Store proof artifact
-            artifact_id = await self._store_proof_artifact(memory_id, proof)
+            artifact_id = await self._store_proof_artifact(
+                memory_id,
+                proof,
+                tenant_id=context.tenant_id,
+            )
 
             # Update memory verification
             await self.pool.execute("""
@@ -541,7 +545,12 @@ class MemoryEnforcementEngine:
 
             # Store proof artifact if provided
             if proof:
-                await self._store_proof_artifact(memory_id, proof)
+                try:
+                    await self._store_proof_artifact(memory_id, proof, tenant_id=tenant_id)
+                except Exception as artifact_exc:
+                    # Proof artifact persistence is best-effort for WBA writes; the
+                    # primary memory record remains valid and should not hard-fail.
+                    logger.warning("Proof artifact storage skipped: %s", artifact_exc)
 
             return memory_id
 
@@ -552,16 +561,17 @@ class MemoryEnforcementEngine:
     async def _store_proof_artifact(
         self,
         memory_id: str,
-        proof: VerificationProof
+        proof: VerificationProof,
+        tenant_id: str = DEFAULT_TENANT_ID,
     ) -> str:
         """Store a verification proof artifact"""
         try:
             result = await self.pool.fetchrow("""
                 INSERT INTO memory_verification_artifacts (
                     memory_id, artifact_type, artifact_url, artifact_hash,
-                    artifact_content, evidence_level, created_by, expires_at, metadata
+                    artifact_content, evidence_level, created_by, expires_at, metadata, tenant_id
                 ) VALUES (
-                    $1::uuid, $2, $3, $4, $5::jsonb, $6::evidence_level, $7, $8, $9::jsonb
+                    $1::uuid, $2, $3, $4, $5::jsonb, $6::evidence_level, $7, $8, $9::jsonb, $10::uuid
                 )
                 RETURNING id::text
             """,
@@ -573,7 +583,8 @@ class MemoryEnforcementEngine:
                 proof.evidence_level.value,
                 proof.created_by,
                 proof.expires_at,
-                json.dumps(proof.metadata)
+                json.dumps(proof.metadata),
+                tenant_id,
             )
 
             return result["id"]
