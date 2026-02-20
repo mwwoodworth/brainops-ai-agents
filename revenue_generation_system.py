@@ -180,6 +180,85 @@ def _parse_ai_json_payload(
 
     return None
 
+
+_VALUE_SUFFIX_MULTIPLIER = {
+    "k": 1_000.0,
+    "thousand": 1_000.0,
+    "m": 1_000_000.0,
+    "million": 1_000_000.0,
+    "b": 1_000_000_000.0,
+    "billion": 1_000_000_000.0,
+}
+
+
+def _coerce_value_estimate(raw_value: Any) -> float | None:
+    """Best-effort normalization for lead value estimates.
+
+    Accepts raw numbers and common string formats such as:
+    - "$4,000,000"
+    - "900K-2.9M" (uses upper bound)
+    - "4 million"
+    """
+    if raw_value is None:
+        return None
+
+    if isinstance(raw_value, bool):
+        return None
+
+    if isinstance(raw_value, (int, float)):
+        value = float(raw_value)
+        return value if value > 0 else None
+
+    if isinstance(raw_value, dict):
+        candidates: list[float] = []
+        for key in (
+            "estimated_value",
+            "value_estimate",
+            "max",
+            "high",
+            "upper",
+            "amount",
+            "budget",
+        ):
+            parsed = _coerce_value_estimate(raw_value.get(key))
+            if parsed is not None:
+                candidates.append(parsed)
+        return max(candidates) if candidates else None
+
+    if not isinstance(raw_value, str):
+        return None
+
+    text = raw_value.strip().lower()
+    if not text:
+        return None
+
+    # Keep digits/decimal/signs/suffixes and separators; strip currency tokens.
+    text = text.replace(",", "")
+    matches = re.findall(
+        r"(\d+(?:\.\d+)?)\s*([kmb]|thousand|million|billion)?",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not matches:
+        return None
+
+    values: list[float] = []
+    for number_text, suffix in matches:
+        try:
+            value = float(number_text)
+        except ValueError:
+            continue
+        multiplier = _VALUE_SUFFIX_MULTIPLIER.get((suffix or "").lower(), 1.0)
+        scaled = value * multiplier
+        if scaled > 0:
+            values.append(scaled)
+
+    if not values:
+        return None
+
+    # For range-like strings (e.g., 900K-2.9M), use upper bound.
+    return max(values)
+
 # Database configuration - use config module for consistency
 # NO hardcoded credentials - all values MUST come from environment variables
 try:
@@ -813,10 +892,36 @@ class AutonomousRevenueSystem:
 
             lead_id = str(uuid.uuid4())
             lead_email = (lead_data.get("email") or "").strip() or None
+            metadata = lead_data.get("metadata") if isinstance(lead_data.get("metadata"), dict) else {}
+            buying_signals = lead_data.get("buying_signals")
+            if isinstance(buying_signals, list) and buying_signals and "buying_signals" not in metadata:
+                metadata = {**metadata, "buying_signals": buying_signals}
+
+            value_estimate = _coerce_value_estimate(
+                lead_data.get("value_estimate")
+                or lead_data.get("estimated_value")
+                or metadata.get("value_estimate")
+                or metadata.get("estimated_value")
+                or lead_data.get("budget_range")
+            )
+
+            score = lead_data.get("confidence_score")
+            try:
+                normalized_score = float(score) if score is not None else None
+            except (TypeError, ValueError):
+                normalized_score = None
+            if normalized_score is not None:
+                normalized_score = max(0.0, min(1.0, normalized_score))
+
+            stage_value = str(lead_data.get("stage") or LeadStage.NEW.value).strip().lower()
+            valid_stages = {stage.value for stage in LeadStage}
+            if stage_value not in valid_stages:
+                stage_value = LeadStage.NEW.value
+
             cursor.execute("""
                 INSERT INTO revenue_leads
-                (id, company_name, contact_name, email, phone, website, source, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (id, company_name, contact_name, email, phone, website, source, stage, score, value_estimate, metadata)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT ON CONSTRAINT uq_revenue_leads_email_not_null
                 DO UPDATE SET
                     company_name = COALESCE(EXCLUDED.company_name, revenue_leads.company_name),
@@ -824,6 +929,9 @@ class AutonomousRevenueSystem:
                     phone = COALESCE(EXCLUDED.phone, revenue_leads.phone),
                     website = COALESCE(EXCLUDED.website, revenue_leads.website),
                     source = COALESCE(EXCLUDED.source, revenue_leads.source),
+                    stage = COALESCE(EXCLUDED.stage, revenue_leads.stage),
+                    score = COALESCE(EXCLUDED.score, revenue_leads.score),
+                    value_estimate = COALESCE(EXCLUDED.value_estimate, revenue_leads.value_estimate),
                     metadata = COALESCE(revenue_leads.metadata, '{}'::jsonb) || COALESCE(EXCLUDED.metadata, '{}'::jsonb),
                     updated_at = NOW()
                 RETURNING id
@@ -835,7 +943,10 @@ class AutonomousRevenueSystem:
                 lead_data.get('phone'),
                 lead_data.get('website'),
                 lead_data.get('source', 'ai_discovery'),
-                json.dumps(lead_data.get('metadata', {}))
+                stage_value,
+                normalized_score,
+                value_estimate,
+                json.dumps(metadata)
             ))
 
             row = cursor.fetchone()
