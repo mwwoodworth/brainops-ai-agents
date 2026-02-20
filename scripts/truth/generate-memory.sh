@@ -47,13 +47,13 @@ fi
 # 2. Extract metrics and generate MEMORY.md
 python3 -c "
 import json, hashlib, sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 snapshot = json.loads('''$(echo "$SNAPSHOT" | sed "s/'/\\\\'/g")''')
 db = snapshot['database']
 svc = snapshot['services']
 
-snapshot_date = db.get('snapshot_ts', datetime.now(datetime.timezone.utc).isoformat())[:10]
+snapshot_date = db.get('snapshot_ts', datetime.now(timezone.utc).isoformat())[:10]
 version = '$VERSION'
 
 # Compute truth hash from key metrics
@@ -120,9 +120,9 @@ invariant_block = f'''- 14 checks, 5 min cycle, Resend alerts. {inv_unresolved} 
 service_block = f'''- Agents {agents_ver} ({agents_status}), Backend v{backend_ver} ({backend_status}), MCP Bridge {mcp_servers} servers/{mcp_tools} tools ({mcp_status}).
 - All 7 Vercel services: HTTP 200. Stripe: charges_enabled=true, \$0 balance.'''
 
-perfection_block = '''- **3/10 phases PASS**: 01 Gateway Tasks, 02 Alert Signal Quality, 03 DB RLS & Invariants Truth.
-- **Phase 04 IN PROGRESS**: Truth Systems — eliminating MEMORY.md drift.
-- PRs: CC#3 (merged), CC#4, Agents#4, Agents#5, Backend#2 (all open).'''
+perfection_block = '''- **4/10 phases PASS**: 01 Gateway Tasks, 02 Alert Signal Quality, 03 DB RLS & Invariants Truth, 04 Truth Systems.
+- Phases 05-10: PENDING (awaiting directives).
+- PRs: CC#3 (merged), CC#4, Agents#4, Agents#5, Agents#6, Backend#2 (all open).'''
 
 # Read narrative template
 with open('$SCRIPT_DIR/narrative.md', 'r') as f:
