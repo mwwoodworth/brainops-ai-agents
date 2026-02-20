@@ -1037,8 +1037,8 @@ class IntelligentTaskOrchestrator:
                     """
                 INSERT INTO task_execution_history
                 (task_id, status, assigned_agent, started_at, completed_at, duration_ms, result, retry_count,
-                 risk_assessment, confidence_score, human_escalation_required, escalation_reason)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 risk_assessment, confidence_score, human_escalation_required, escalation_reason, tenant_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                     (
                         task.id,
@@ -1053,6 +1053,7 @@ class IntelligentTaskOrchestrator:
                         task.confidence_score,
                         task.human_escalation_required,
                         task.escalation_reason,
+                        _resolve_valid_tenant_id(),
                     ),
                 )
                 conn.commit()

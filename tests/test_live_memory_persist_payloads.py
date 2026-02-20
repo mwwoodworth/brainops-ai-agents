@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 import pytest
@@ -89,9 +90,11 @@ async def test_persist_memory_coerces_array_payloads() -> None:
     connections = params[9]
     predictions = params[11]
     contradictions = params[12]
+    tenant_id = params[14]
 
     assert isinstance(connections, list)
     assert isinstance(predictions, list)
     assert isinstance(contradictions, list)
     assert predictions == []
     assert contradictions == []
+    assert str(uuid.UUID(str(tenant_id))) == str(tenant_id)

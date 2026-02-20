@@ -83,6 +83,16 @@ DB_CONFIG = {
     "port": int(os.getenv("DB_PORT", "5432"))
 }
 
+DEFAULT_TENANT_ID = os.getenv("DEFAULT_TENANT_ID", "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457")
+
+
+def _resolve_valid_tenant_id() -> str:
+    candidate = (DEFAULT_TENANT_ID or "").strip()
+    try:
+        return str(uuid.UUID(candidate))
+    except Exception:
+        return "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457"
+
 # Memory configuration
 MEMORY_CONFIG = {
     "max_working_memory": 100,      # Items in active working memory
@@ -1521,6 +1531,7 @@ class LiveMemoryBrain:
             return
 
         try:
+            tenant_id = _resolve_valid_tenant_id()
             # NOTE: Production schema drift exists for live_brain_memories (some
             # environments use predictions as text[] instead of jsonb). Always
             # coerce predictions into a postgres-safe TEXT[] payload to avoid:
@@ -1566,7 +1577,7 @@ class LiveMemoryBrain:
                         id, content, memory_type, importance, confidence,
                         created_at, last_accessed, access_count, provenance,
                         connections, temporal_context, predictions, contradictions,
-                        crystallization_count
+                        crystallization_count, tenant_id
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (id) DO UPDATE SET
                         content = EXCLUDED.content,
@@ -1587,7 +1598,8 @@ class LiveMemoryBrain:
                     json.dumps(memory.temporal_context, default=str),
                     predictions_payload,
                     contradictions_payload,
-                    memory.crystallization_count
+                    memory.crystallization_count,
+                    tenant_id,
                 ))
                 conn.commit()
                 cursor.close()

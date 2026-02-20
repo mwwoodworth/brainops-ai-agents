@@ -812,27 +812,40 @@ class AutonomousRevenueSystem:
             cursor = conn.cursor()
 
             lead_id = str(uuid.uuid4())
+            lead_email = (lead_data.get("email") or "").strip() or None
             cursor.execute("""
                 INSERT INTO revenue_leads
                 (id, company_name, contact_name, email, phone, website, source, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT ON CONSTRAINT uq_revenue_leads_email_not_null
+                DO UPDATE SET
+                    company_name = COALESCE(EXCLUDED.company_name, revenue_leads.company_name),
+                    contact_name = COALESCE(EXCLUDED.contact_name, revenue_leads.contact_name),
+                    phone = COALESCE(EXCLUDED.phone, revenue_leads.phone),
+                    website = COALESCE(EXCLUDED.website, revenue_leads.website),
+                    source = COALESCE(EXCLUDED.source, revenue_leads.source),
+                    metadata = COALESCE(revenue_leads.metadata, '{}'::jsonb) || COALESCE(EXCLUDED.metadata, '{}'::jsonb),
+                    updated_at = NOW()
                 RETURNING id
             """, (
                 lead_id,
                 lead_data.get('company_name'),
                 lead_data.get('contact_name'),
-                lead_data.get('email'),
+                lead_email,
                 lead_data.get('phone'),
                 lead_data.get('website'),
                 lead_data.get('source', 'ai_discovery'),
                 json.dumps(lead_data.get('metadata', {}))
             ))
 
+            row = cursor.fetchone()
             conn.commit()
             cursor.close()
             conn.close()
 
-            return lead_id
+            if not row:
+                return None
+            return str(row[0])
         except Exception as e:
             logger.error(f"Failed to store lead: {e}")
             return None

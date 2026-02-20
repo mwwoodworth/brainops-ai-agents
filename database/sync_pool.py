@@ -8,6 +8,7 @@ Do NOT create your own psycopg2 connections!
 import logging
 import os
 import threading
+import uuid
 from contextlib import contextmanager
 from queue import Empty, Queue
 from typing import Any, Optional
@@ -50,6 +51,27 @@ DB_CONFIG = {
     "password": _db_password,
     "port": int(_db_port)
 }
+
+
+def _resolve_default_tenant_id() -> Optional[str]:
+    """Resolve a stable default tenant id for RLS session context."""
+    for candidate in (
+        os.getenv("DEFAULT_TENANT_ID"),
+        os.getenv("TENANT_ID"),
+        os.getenv("APP_DEFAULT_TENANT_ID"),
+        "51e728c5-94e8-4ae0-8a0a-6a08d1fb3457",
+    ):
+        raw = (candidate or "").strip()
+        if not raw:
+            continue
+        try:
+            return str(uuid.UUID(raw))
+        except Exception:
+            logger.warning("Invalid tenant UUID candidate ignored: %r", raw)
+    return None
+
+
+DEFAULT_TENANT_ID = _resolve_default_tenant_id()
 
 # Validate password is set
 if not DB_CONFIG["password"]:
@@ -115,11 +137,40 @@ class SyncConnectionPool:
                 connect_timeout=CONNECTION_TIMEOUT
             )
             conn.autocommit = True
+            self._apply_tenant_context(conn)
             return conn
         except Exception as e:
             self._last_error = str(e)
             logger.error(f"Failed to create connection: {e}")
             return None
+
+    def _apply_tenant_context(self, conn: Any) -> None:
+        """Set deterministic tenant context on pooled connections for RLS writes."""
+        if not DEFAULT_TENANT_ID or conn is None:
+            return
+        cur = None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT set_config('app.current_tenant_id', %s, false), "
+                "set_config('app.tenant_id', %s, false), "
+                "set_config('request.jwt.claim.tenant_id', %s, false), "
+                "set_config('request.jwt.claim.organization_id', %s, false)",
+                (
+                    DEFAULT_TENANT_ID,
+                    DEFAULT_TENANT_ID,
+                    DEFAULT_TENANT_ID,
+                    DEFAULT_TENANT_ID,
+                ),
+            )
+        except Exception as exc:
+            logger.warning("Failed to apply tenant context on sync connection: %s", exc)
+        finally:
+            if cur:
+                try:
+                    cur.close()
+                except Exception:
+                    logger.debug("Failed to close tenant context cursor", exc_info=True)
 
     @contextmanager
     def get_connection(self):
@@ -191,6 +242,8 @@ class SyncConnectionPool:
 
         # Now yield exactly once - this is the only yield in the generator
         try:
+            if conn:
+                self._apply_tenant_context(conn)
             yield conn
         finally:
             # Return connection to pool

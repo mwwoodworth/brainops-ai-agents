@@ -83,3 +83,58 @@ async def test_identify_new_leads_skips_discovery_on_invalid_json(monkeypatch):
 
     assert lead_ids == []
     assert calls["discover"] == 0
+
+
+class _FakeLeadCursor:
+    def __init__(self) -> None:
+        self.query = ""
+        self.params = ()
+
+    def execute(self, query, params) -> None:
+        self.query = query
+        self.params = params
+
+    def fetchone(self):
+        return ("existing-lead-id",)
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeLeadConn:
+    def __init__(self) -> None:
+        self.cursor_obj = _FakeLeadCursor()
+        self.committed = False
+
+    def cursor(self):
+        return self.cursor_obj
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def close(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_store_lead_uses_upsert_on_email_conflict(monkeypatch):
+    conn = _FakeLeadConn()
+
+    def _fake_connect(**_kwargs):
+        return conn
+
+    monkeypatch.setattr(rgs.psycopg2, "connect", _fake_connect)
+
+    system = rgs.AutonomousRevenueSystem.__new__(rgs.AutonomousRevenueSystem)
+    lead_id = await system._store_lead(
+        {
+            "company_name": "Acme Roofing",
+            "contact_name": "Alex",
+            "email": "sales@acme.example",
+            "metadata": {"source": "test"},
+        }
+    )
+
+    assert lead_id == "existing-lead-id"
+    assert conn.committed is True
+    assert "ON CONFLICT ON CONSTRAINT uq_revenue_leads_email_not_null" in conn.cursor_obj.query
