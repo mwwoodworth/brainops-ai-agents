@@ -52,13 +52,13 @@ class Insight:
 
     def to_dict(self):
         return {
-            'category': self.category.value,
-            'title': self.title,
-            'description': self.description,
-            'severity': self.severity,
-            'data': self.data,
-            'action_recommended': self.action_recommended,
-            'timestamp': self.timestamp.isoformat()
+            "category": self.category.value,
+            "title": self.title,
+            "description": self.description,
+            "severity": self.severity,
+            "data": self.data,
+            "action_recommended": self.action_recommended,
+            "timestamp": self.timestamp.isoformat(),
         }
 
 
@@ -72,9 +72,9 @@ class SystemAwareness:
         self.last_scan = {}
         self.anomalies = []
         self.services = {
-            'brainops-ai-agents': 'https://brainops-ai-agents.onrender.com',
-            'brainops-backend': 'https://brainops-backend-prod.onrender.com',
-            'mcp-bridge': 'https://brainops-mcp-bridge.onrender.com'
+            "brainops-ai-agents": "https://brainops-ai-agents.onrender.com",
+            "brainops-backend": "https://brainops-backend-prod.onrender.com",
+            "mcp-bridge": "https://brainops-mcp-bridge.onrender.com",
         }
 
     def _get_pool(self):
@@ -104,49 +104,58 @@ class SystemAwareness:
         try:
             pool = self._get_pool()
             if using_fallback():
-                insights.append(Insight(
-                    category=AwarenessCategory.BUSINESS,
-                    title="Business Metrics Unavailable",
-                    description="Primary database unavailable; running with in-memory fallback.",
-                    severity="warning",
-                    data={"fallback": True},
-                    action_recommended="Restore primary database connectivity"
-                ))
+                insights.append(
+                    Insight(
+                        category=AwarenessCategory.BUSINESS,
+                        title="Business Metrics Unavailable",
+                        description="Primary database unavailable; running with in-memory fallback.",
+                        severity="warning",
+                        data={"fallback": True},
+                        action_recommended="Restore primary database connectivity",
+                    )
+                )
                 return insights
 
-            customers_row = await pool.fetchrow("""
+            customers_row = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_customers,
                     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as new_24h,
                     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days') as new_7d,
                     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') as new_30d
                 FROM customers
-            """)
+            """
+            )
             customers = self._row_to_dict(customers_row)
 
             if customers:
-                new_24h = customers.get('new_24h') or 0
-                new_7d = customers.get('new_7d') or 0
+                new_24h = customers.get("new_24h") or 0
+                new_7d = customers.get("new_7d") or 0
                 if new_24h == 0 and new_7d > 0:
-                    insights.append(Insight(
-                        category=AwarenessCategory.CUSTOMERS,
-                        title="No New Customers Today",
-                        description=f"Zero customer acquisition in last 24h. Weekly average: {new_7d/7:.1f}/day",
-                        severity="warning",
-                        data=dict(customers),
-                        action_recommended="Review marketing channels and lead sources"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.CUSTOMERS,
+                            title="No New Customers Today",
+                            description=f"Zero customer acquisition in last 24h. Weekly average: {new_7d/7:.1f}/day",
+                            severity="warning",
+                            data=dict(customers),
+                            action_recommended="Review marketing channels and lead sources",
+                        )
+                    )
                 elif new_7d > 0 and new_24h > new_7d / 7 * 2:
-                    insights.append(Insight(
-                        category=AwarenessCategory.CUSTOMERS,
-                        title="Customer Acquisition Spike",
-                        description=f"{new_24h} new customers today - 2x above daily average!",
-                        severity="info",
-                        data=dict(customers),
-                        action_recommended="Investigate source and consider scaling support"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.CUSTOMERS,
+                            title="Customer Acquisition Spike",
+                            description=f"{new_24h} new customers today - 2x above daily average!",
+                            severity="info",
+                            data=dict(customers),
+                            action_recommended="Investigate source and consider scaling support",
+                        )
+                    )
 
-            jobs_row = await pool.fetchrow("""
+            jobs_row = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) as total_jobs,
                     COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') as new_24h,
@@ -154,39 +163,47 @@ class SystemAwareness:
                     COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
                     COUNT(*) FILTER (WHERE status = 'completed' AND updated_at > NOW() - INTERVAL '24 hours') as completed_24h
                 FROM jobs
-            """)
+            """
+            )
             jobs = self._row_to_dict(jobs_row)
 
             if jobs:
-                pending = jobs.get('pending') or 0
+                pending = jobs.get("pending") or 0
                 if pending > 100:
-                    insights.append(Insight(
-                        category=AwarenessCategory.BUSINESS,
-                        title="High Pending Job Backlog",
-                        description=f"{pending} jobs pending. Backlog needs attention.",
-                        severity="warning" if pending < 200 else "critical",
-                        data=dict(jobs),
-                        action_recommended="Allocate more crew resources or automate processing"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.BUSINESS,
+                            title="High Pending Job Backlog",
+                            description=f"{pending} jobs pending. Backlog needs attention.",
+                            severity="warning" if pending < 200 else "critical",
+                            data=dict(jobs),
+                            action_recommended="Allocate more crew resources or automate processing",
+                        )
+                    )
 
-                completed_24h = jobs.get('completed_24h') or 0
+                completed_24h = jobs.get("completed_24h") or 0
                 if completed_24h > 0:
-                    insights.append(Insight(
-                        category=AwarenessCategory.BUSINESS,
-                        title="Daily Job Completion",
-                        description=f"Completed {completed_24h} jobs in last 24 hours",
-                        severity="info",
-                        data=dict(jobs)
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.BUSINESS,
+                            title="Daily Job Completion",
+                            description=f"Completed {completed_24h} jobs in last 24 hours",
+                            severity="info",
+                            data=dict(jobs),
+                        )
+                    )
 
-            revenue_row = await pool.fetchrow("""
+            revenue_row = await pool.fetchrow(
+                """
                 SELECT
                     COALESCE(SUM(total_amount), 0) as today_revenue,
                     COUNT(*) as today_invoices
                 FROM invoices
                 WHERE created_at > NOW() - INTERVAL '24 hours'
-            """)
-            avg_revenue_row = await pool.fetchrow("""
+            """
+            )
+            avg_revenue_row = await pool.fetchrow(
+                """
                 SELECT COALESCE(AVG(daily_revenue), 0) as avg_daily
                 FROM (
                     SELECT DATE(created_at), SUM(total_amount) as daily_revenue
@@ -194,41 +211,52 @@ class SystemAwareness:
                     WHERE created_at > NOW() - INTERVAL '30 days'
                     GROUP BY DATE(created_at)
                 ) daily
-            """)
+            """
+            )
             revenue = self._row_to_dict(revenue_row)
             avg_revenue = self._row_to_dict(avg_revenue_row)
 
             if revenue and avg_revenue:
-                today = float(revenue.get('today_revenue') or 0)
-                avg = float(avg_revenue.get('avg_daily') or 0)
+                today = float(revenue.get("today_revenue") or 0)
+                avg = float(avg_revenue.get("avg_daily") or 0)
 
                 if avg > 0 and today < avg * 0.5:
-                    insights.append(Insight(
-                        category=AwarenessCategory.REVENUE,
-                        title="Revenue Below Average",
-                        description=f"Today: ${today:,.2f} vs 30-day avg: ${avg:,.2f}/day ({today/avg*100:.0f}%)",
-                        severity="warning",
-                        data={'today': today, 'average': avg, 'ratio': today/avg if avg else 0},
-                        action_recommended="Review sales pipeline and pending invoices"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.REVENUE,
+                            title="Revenue Below Average",
+                            description=f"Today: ${today:,.2f} vs 30-day avg: ${avg:,.2f}/day ({today/avg*100:.0f}%)",
+                            severity="warning",
+                            data={
+                                "today": today,
+                                "average": avg,
+                                "ratio": today / avg if avg else 0,
+                            },
+                            action_recommended="Review sales pipeline and pending invoices",
+                        )
+                    )
                 elif avg > 0 and today > avg * 1.5:
-                    insights.append(Insight(
-                        category=AwarenessCategory.REVENUE,
-                        title="Revenue Above Average",
-                        description=f"Strong day! ${today:,.2f} - {today/avg*100:.0f}% of average",
-                        severity="info",
-                        data={'today': today, 'average': avg}
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.REVENUE,
+                            title="Revenue Above Average",
+                            description=f"Strong day! ${today:,.2f} - {today/avg*100:.0f}% of average",
+                            severity="info",
+                            data={"today": today, "average": avg},
+                        )
+                    )
 
         except Exception as e:
             logger.error(f"Business scan error: {e}")
-            insights.append(Insight(
-                category=AwarenessCategory.BUSINESS,
-                title="Business Metrics Scan Failed",
-                description=str(e),
-                severity="warning",
-                data={'error': str(e)}
-            ))
+            insights.append(
+                Insight(
+                    category=AwarenessCategory.BUSINESS,
+                    title="Business Metrics Scan Failed",
+                    description=str(e),
+                    severity="warning",
+                    data={"error": str(e)},
+                )
+            )
 
         return insights
 
@@ -247,51 +275,84 @@ class SystemAwareness:
 
         return insights
 
-    async def _check_service_health(self, client: httpx.AsyncClient, service_name: str, url: str) -> list[Insight]:
+    # Status codes that indicate a Render free-tier cold-start (transient).
+    _COLD_START_CODES = {502, 503}
+    _COLD_START_RETRY_DELAY = 12  # seconds to wait before retry
+
+    async def _check_service_health(
+        self, client: httpx.AsyncClient, service_name: str, url: str
+    ) -> list[Insight]:
         insights: list[Insight] = []
         try:
             start = time.perf_counter()
             response = await client.get(f"{url}/health")
             latency = (time.perf_counter() - start) * 1000
 
+            # If we got a cold-start code (502/503), retry once after a delay
+            # before treating it as critical.  Render free-tier services sleep
+            # after inactivity and the first request wakes them up.
+            if response.status_code in self._COLD_START_CODES:
+                logger.info(
+                    "%s returned %s (possible cold start), retrying in %ds...",
+                    service_name,
+                    response.status_code,
+                    self._COLD_START_RETRY_DELAY,
+                )
+                await asyncio.sleep(self._COLD_START_RETRY_DELAY)
+                start = time.perf_counter()
+                response = await client.get(f"{url}/health")
+                latency = (time.perf_counter() - start) * 1000
+
             if response.status_code == 200:
                 data = response.json()
-                insights.append(Insight(
-                    category=AwarenessCategory.DEVOPS,
-                    title=f"{service_name}: Online",
-                    description=f"Version {data.get('version', 'unknown')}, latency: {latency:.0f}ms",
-                    severity="info",
-                    data={'status': 'online', 'version': data.get('version'), 'latency_ms': latency}
-                ))
+                insights.append(
+                    Insight(
+                        category=AwarenessCategory.DEVOPS,
+                        title=f"{service_name}: Online",
+                        description=f"Version {data.get('version', 'unknown')}, latency: {latency:.0f}ms",
+                        severity="info",
+                        data={
+                            "status": "online",
+                            "version": data.get("version"),
+                            "latency_ms": latency,
+                        },
+                    )
+                )
 
                 if latency > 2000:
-                    insights.append(Insight(
-                        category=AwarenessCategory.PERFORMANCE,
-                        title=f"{service_name}: High Latency",
-                        description=f"Response time {latency:.0f}ms exceeds 2000ms threshold",
-                        severity="warning",
-                        data={'service': service_name, 'latency_ms': latency},
-                        action_recommended="Investigate service performance"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.PERFORMANCE,
+                            title=f"{service_name}: High Latency",
+                            description=f"Response time {latency:.0f}ms exceeds 2000ms threshold",
+                            severity="warning",
+                            data={"service": service_name, "latency_ms": latency},
+                            action_recommended="Investigate service performance",
+                        )
+                    )
             else:
-                insights.append(Insight(
-                    category=AwarenessCategory.DEVOPS,
-                    title=f"{service_name}: Degraded",
-                    description=f"Status code {response.status_code}",
-                    severity="critical",
-                    data={'status': 'degraded', 'status_code': response.status_code},
-                    action_recommended=f"Check {service_name} logs immediately"
-                ))
+                insights.append(
+                    Insight(
+                        category=AwarenessCategory.DEVOPS,
+                        title=f"{service_name}: Degraded",
+                        description=f"Status code {response.status_code}",
+                        severity="critical",
+                        data={"status": "degraded", "status_code": response.status_code},
+                        action_recommended=f"Check {service_name} logs immediately",
+                    )
+                )
 
         except Exception as e:
-            insights.append(Insight(
-                category=AwarenessCategory.DEVOPS,
-                title=f"{service_name}: Unreachable",
-                description=str(e),
-                severity="critical",
-                data={'status': 'offline', 'error': str(e)},
-                action_recommended=f"Restart {service_name} or check Render dashboard"
-            ))
+            insights.append(
+                Insight(
+                    category=AwarenessCategory.DEVOPS,
+                    title=f"{service_name}: Unreachable",
+                    description=str(e),
+                    severity="critical",
+                    data={"status": "offline", "error": str(e)},
+                    action_recommended=f"Restart {service_name} or check Render dashboard",
+                )
+            )
 
         return insights
 
@@ -304,7 +365,8 @@ class SystemAwareness:
             if using_fallback():
                 return insights
 
-            agent_errors = await pool.fetch("""
+            agent_errors = await pool.fetch(
+                """
                 SELECT
                     agent_name,
                     COUNT(*) as total,
@@ -313,23 +375,26 @@ class SystemAwareness:
                 FROM ai_agent_executions
                 WHERE created_at > NOW() - INTERVAL '24 hours'
                 GROUP BY agent_name
-            """)
+            """
+            )
 
             for row in agent_errors:
                 ae = self._row_to_dict(row) or {}
-                total = ae.get('total') or 0
-                errors = ae.get('errors') or 0
+                total = ae.get("total") or 0
+                errors = ae.get("errors") or 0
                 if total > 0:
                     error_rate = errors / total
                     if error_rate > 0.1:
-                        insights.append(Insight(
-                            category=AwarenessCategory.DEVOPS,
-                            title=f"Agent Error Rate: {ae.get('agent_name')}",
-                            description=f"{errors}/{total} executions failed ({error_rate*100:.1f}%)",
-                            severity="critical" if error_rate > 0.25 else "warning",
-                            data=dict(ae),
-                            action_recommended=f"Review {ae.get('agent_name')} agent logs and fix issues"
-                        ))
+                        insights.append(
+                            Insight(
+                                category=AwarenessCategory.DEVOPS,
+                                title=f"Agent Error Rate: {ae.get('agent_name')}",
+                                description=f"{errors}/{total} executions failed ({error_rate*100:.1f}%)",
+                                severity="critical" if error_rate > 0.25 else "warning",
+                                data=dict(ae),
+                                action_recommended=f"Review {ae.get('agent_name')} agent logs and fix issues",
+                            )
+                        )
 
         except Exception as e:
             logger.error(f"Error scan failed: {e}")
@@ -345,29 +410,33 @@ class SystemAwareness:
             if using_fallback():
                 return insights
 
-            access_row = await pool.fetchrow("""
+            access_row = await pool.fetchrow(
+                """
                 SELECT
                     COUNT(*) FILTER (WHERE status_code = 401) as auth_failures,
                     COUNT(*) FILTER (WHERE status_code = 403) as forbidden,
                     COUNT(*) as total_requests
                 FROM api_request_logs
                 WHERE created_at > NOW() - INTERVAL '1 hour'
-            """)
+            """
+            )
             access = self._row_to_dict(access_row)
 
-            if access and access.get('total_requests', 0) > 0:
-                auth_failures = access.get('auth_failures') or 0
-                total_requests = access.get('total_requests') or 0
+            if access and access.get("total_requests", 0) > 0:
+                auth_failures = access.get("auth_failures") or 0
+                total_requests = access.get("total_requests") or 0
                 auth_fail_rate = auth_failures / total_requests
                 if auth_fail_rate > 0.05:
-                    insights.append(Insight(
-                        category=AwarenessCategory.SECURITY,
-                        title="High Authentication Failure Rate",
-                        description=f"{auth_failures} auth failures in last hour ({auth_fail_rate*100:.1f}%)",
-                        severity="warning" if auth_fail_rate < 0.2 else "critical",
-                        data=dict(access),
-                        action_recommended="Review failed auth attempts for potential attack"
-                    ))
+                    insights.append(
+                        Insight(
+                            category=AwarenessCategory.SECURITY,
+                            title="High Authentication Failure Rate",
+                            description=f"{auth_failures} auth failures in last hour ({auth_fail_rate*100:.1f}%)",
+                            severity="warning" if auth_fail_rate < 0.2 else "critical",
+                            data=dict(access),
+                            action_recommended="Review failed auth attempts for potential attack",
+                        )
+                    )
 
         except Exception as exc:
             # Table might not exist; ignore to avoid alert spam.
@@ -388,7 +457,7 @@ class SystemAwareness:
             self.scan_devops_status(),
             self.scan_error_rates(),
             self.scan_security(),
-            return_exceptions=True
+            return_exceptions=True,
         )
 
         for result in [business, devops, errors, security]:
@@ -406,22 +475,24 @@ class SystemAwareness:
         scan_duration = (datetime.utcnow() - start_time).total_seconds()
 
         # Categorize by severity
-        critical = [i for i in all_insights if i.severity == 'critical']
-        warnings = [i for i in all_insights if i.severity == 'warning']
-        info = [i for i in all_insights if i.severity == 'info']
+        critical = [i for i in all_insights if i.severity == "critical"]
+        warnings = [i for i in all_insights if i.severity == "warning"]
+        info = [i for i in all_insights if i.severity == "info"]
 
         summary = {
-            'scan_time': start_time.isoformat(),
-            'duration_seconds': scan_duration,
-            'total_insights': len(all_insights),
-            'critical': len(critical),
-            'warnings': len(warnings),
-            'info': len(info),
-            'insights': [i.to_dict() for i in all_insights],
-            'top_concerns': [i.to_dict() for i in critical + warnings][:5]
+            "scan_time": start_time.isoformat(),
+            "duration_seconds": scan_duration,
+            "total_insights": len(all_insights),
+            "critical": len(critical),
+            "warnings": len(warnings),
+            "info": len(info),
+            "insights": [i.to_dict() for i in all_insights],
+            "top_concerns": [i.to_dict() for i in critical + warnings][:5],
         }
 
-        logger.info(f"✅ Scan complete: {len(critical)} critical, {len(warnings)} warnings, {len(info)} info")
+        logger.info(
+            f"✅ Scan complete: {len(critical)} critical, {len(warnings)} warnings, {len(info)} info"
+        )
 
         return summary
 
@@ -437,7 +508,8 @@ class SystemAwareness:
                 return
 
             for insight in insights:
-                await pool.execute("""
+                await pool.execute(
+                    """
                     INSERT INTO ai_system_insights
                     (category, title, description, severity, data, action_recommended)
                     VALUES ($1, $2, $3, $4, $5, $6)
@@ -447,7 +519,7 @@ class SystemAwareness:
                     insight.description,
                     insight.severity,
                     json.dumps(insight.data),
-                    insight.action_recommended
+                    insight.action_recommended,
                 )
 
         except Exception as e:
@@ -489,25 +561,26 @@ def get_system_awareness() -> SystemAwareness:
 
 
 if __name__ == "__main__":
+
     async def test():
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🔍 SYSTEM AWARENESS TEST")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
 
         from database.async_connection import init_pool, PoolConfig
         import os
-        
+
         # Configure DB from env
         db_config = PoolConfig(
-            host=os.getenv('DB_HOST'),
-            port=int(os.getenv('DB_PORT', 5432)),
-            user=os.getenv('DB_USER'),
-            password=os.getenv('DB_PASSWORD'),
-            database=os.getenv('DB_NAME'),
+            host=os.getenv("DB_HOST"),
+            port=int(os.getenv("DB_PORT", 5432)),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            database=os.getenv("DB_NAME"),
             ssl=True,
-            ssl_verify=False  # Bypass for awareness test
+            ssl_verify=False,  # Bypass for awareness test
         )
-        
+
         await init_pool(db_config)
 
         awareness = get_system_awareness()
