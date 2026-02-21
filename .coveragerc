@@ -1,0 +1,20 @@
+[run]
+source = .
+omit =
+    venv/*
+    tests/*
+    *_deprecated_*
+    scripts/*
+
+[report]
+# Critical modules that MUST maintain coverage floors
+# Run: python3 -m pytest --cov=. --cov-config=.coveragerc --cov-fail-under=0 tests/ -q
+show_missing = true
+precision = 1
+exclude_lines =
+    pragma: no cover
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+
+[html]
+directory = htmlcov

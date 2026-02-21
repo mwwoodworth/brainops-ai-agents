@@ -67,7 +67,16 @@ if ("pooler.supabase.com" in _db_host or "pooler.supabase.com" in _db_url) and o
 ) == "5432":
     os.environ["DB_PORT"] = "6543"
 
-from fastapi import BackgroundTasks, Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import (
+    BackgroundTasks,
+    Body,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+)
 from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -291,7 +300,9 @@ from api.observability import (
 )
 from api.revenue import router as revenue_router
 from api.taskmate import router as taskmate_router  # P1-TASKMATE-001: Cross-model task manager
-from api.full_power_crud import router as full_power_crud_router  # Full CRUD + lifecycle control plane
+from api.full_power_crud import (
+    router as full_power_crud_router,
+)  # Full CRUD + lifecycle control plane
 from api.revenue_automation import router as revenue_automation_router
 from api.income_streams import router as income_streams_router  # Automated Income Streams
 from api.revenue_complete import router as revenue_complete_router  # Complete Revenue API
@@ -1222,7 +1233,9 @@ async def lifespan(app: FastAPI):
             elif db_ready:
                 logger.info("✅ Database pool initialized")
             else:
-                logger.warning("⚠️ Database pool initialized but health check failed during deferred_init")
+                logger.warning(
+                    "⚠️ Database pool initialized but health check failed during deferred_init"
+                )
 
             # Schema verification (read-only) - no DDL, agent_worker has no DDL perms
             pool = get_pool()
@@ -1260,7 +1273,9 @@ async def lifespan(app: FastAPI):
                     if await _attempt_db_pool_init_once(
                         f"deferred_retry_{attempt}/{attempts}", timeout=5.0
                     ):
-                        logger.info("✅ Deferred database init retry succeeded (%d/%d)", attempt, attempts)
+                        logger.info(
+                            "✅ Deferred database init retry succeeded (%d/%d)", attempt, attempts
+                        )
                         return
                     logger.warning("Deferred database init retry failed (%d/%d)", attempt, attempts)
                 logger.error("❌ Deferred database init retries exhausted (%d attempts)", attempts)
@@ -1971,6 +1986,7 @@ app.add_middleware(
         "X-API-Key",
         "X-Tenant-ID",
         "X-Request-ID",
+        "X-Correlation-ID",
         "Accept",
         "Origin",
         "X-Requested-With",
@@ -2137,6 +2153,24 @@ async def rate_limit_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Correlation ID Middleware — cross-service traceability
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    """Attach correlation ID to every request for cross-service tracing."""
+    correlation_id = (
+        request.headers.get("x-correlation-id")
+        or request.headers.get("x-request-id")
+        or str(uuid.uuid4())
+    )
+    request.state.correlation_id = correlation_id
+    response = await call_next(request)
+    response.headers["X-Correlation-ID"] = correlation_id
+    response.headers["X-Request-ID"] = correlation_id
+    return response
 
 
 # Request/latency observability middleware
@@ -3103,12 +3137,7 @@ def _is_allowlisted_recipient(recipient: str | None) -> bool:
 
 
 def _require_allowlist_in_live_mode() -> bool:
-    return (
-        os.getenv("OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE", "true")
-        .strip()
-        .lower()
-        == "true"
-    )
+    return os.getenv("OUTBOUND_EMAIL_REQUIRE_ALLOWLIST_IN_LIVE", "true").strip().lower() == "true"
 
 
 class SendEmailPayload(BaseModel):
@@ -3242,7 +3271,9 @@ async def health_check(
             pool = get_pool()
         except RuntimeError as e:
             if "not initialized" in str(e):
-                lazy_ready = await _attempt_db_pool_init_once("health_lazy_init", timeout=max(2.0, db_timeout))
+                lazy_ready = await _attempt_db_pool_init_once(
+                    "health_lazy_init", timeout=max(2.0, db_timeout)
+                )
                 if not lazy_ready:
                     # Pool not ready yet - return starting status
                     return {
@@ -3257,7 +3288,9 @@ async def health_check(
             else:
                 raise
         db_healthy = await _pool_roundtrip_healthy(pool, timeout=max(2.0, db_timeout))
-        db_status = "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+        db_status = (
+            "fallback" if using_fallback() else ("connected" if db_healthy else "disconnected")
+        )
         auth_configured = config.security.auth_configured
 
         # Best-effort pool metrics: helps diagnose pool exhaustion vs. connectivity issues.
@@ -3279,7 +3312,9 @@ async def health_check(
         embedded_memory_error = getattr(app.state, "embedded_memory_error", None)
         if EMBEDDED_MEMORY_AVAILABLE and getattr(app.state, "embedded_memory", None) is None:
             try:
-                app.state.embedded_memory = await asyncio.wait_for(get_embedded_memory(), timeout=5.0)
+                app.state.embedded_memory = await asyncio.wait_for(
+                    get_embedded_memory(), timeout=5.0
+                )
                 app.state.embedded_memory_error = None
                 embedded_memory_error = None
                 logger.info("✅ Embedded Memory System lazily initialized from /health")
@@ -4819,7 +4854,9 @@ async def get_agent_history(
                     "output_data": data.get("output_data"),
                     "error": data.get("error_message"),
                     "duration_ms": data.get("execution_time_ms"),
-                    "created_at": data["created_at"].isoformat() if data.get("created_at") else None,
+                    "created_at": data["created_at"].isoformat()
+                    if data.get("created_at")
+                    else None,
                 }
             )
 
@@ -7230,7 +7267,9 @@ async def _fetchval_with_tenant_context(
     async with raw_pool.acquire(timeout=10.0) as conn:
         async with conn.transaction():
             if tenant_uuid:
-                await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", tenant_uuid)
+                await conn.execute(
+                    "SELECT set_config('app.current_tenant_id', $1, true)", tenant_uuid
+                )
             else:
                 await conn.execute("RESET app.current_tenant_id")
             return await conn.fetchval(query, *args)
@@ -7357,7 +7396,9 @@ async def execute_aurea_nl_command(request: Request, payload: AureaCommandReques
                 if fallback_response.status_code >= 400:
                     raise HTTPException(
                         status_code=fallback_response.status_code,
-                        detail=parsed.get("error") or parsed.get("detail") or "AUREA fallback failed",
+                        detail=parsed.get("error")
+                        or parsed.get("detail")
+                        or "AUREA fallback failed",
                     )
                 return {
                     "success": True,
@@ -7377,7 +7418,9 @@ async def execute_aurea_nl_command(request: Request, payload: AureaCommandReques
         except HTTPException:
             raise
         except Exception as fallback_error:
-            logger.error("AUREA fallback command execution failed: %s", fallback_error, exc_info=True)
+            logger.error(
+                "AUREA fallback command execution failed: %s", fallback_error, exc_info=True
+            )
             raise HTTPException(
                 status_code=503,
                 detail=f"AUREA NLU Processor not available; fallback failed: {fallback_error}",
@@ -8820,9 +8863,8 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
             "MRG_DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001"
         )
 
-        gumroad = (
-            await pool.fetchrow(
-                """
+        gumroad = await pool.fetchrow(
+            """
                 SELECT
                     COUNT(*) as total_sales,
                     COALESCE(SUM(price::numeric), 0) as total_revenue,
@@ -8830,13 +8872,10 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 FROM gumroad_sales
                 WHERE is_test = false OR is_test IS NULL
                 """
-            )
-            or {"total_sales": 0, "total_revenue": 0}
-        )
+        ) or {"total_sales": 0, "total_revenue": 0}
 
-        mrg = (
-            await pool.fetchrow(
-                """
+        mrg = await pool.fetchrow(
+            """
                 SELECT
                     COUNT(*) as active_subscriptions,
                     COALESCE(SUM(
@@ -8850,10 +8889,8 @@ async def get_revenue_status(authenticated: bool = Depends(verify_api_key)):
                 WHERE tenant_id = $1
                   AND status = 'active'
                 """,
-                mrg_default_tenant,
-            )
-            or {"active_subscriptions": 0, "mrr": 0}
-        )
+            mrg_default_tenant,
+        ) or {"active_subscriptions": 0, "mrr": 0}
 
         return {
             "timestamp": datetime.utcnow().isoformat(),
