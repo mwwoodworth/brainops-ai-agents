@@ -21,7 +21,8 @@ from config import config
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 # Approver keys: keys containing 'prod' are considered approver keys
-APPROVER_API_KEYS = {k for k in config.security.valid_api_keys if 'prod' in k.lower()}
+APPROVER_API_KEYS = {k for k in config.security.valid_api_keys if "prod" in k.lower()}
+
 
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
@@ -29,34 +30,62 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
+
 async def verify_approver_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify approver API key for SOP approval operations"""
     if not api_key or api_key not in APPROVER_API_KEYS:
         raise HTTPException(status_code=403, detail="Approver access required")
     return api_key
 
+
 router = APIRouter(prefix="/sop", tags=["SOP Generator"])
 
 # HTML sanitization allowed tags
 ALLOWED_TAGS = [
-    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'br', 'hr',
-    'ul', 'ol', 'li', 'dl', 'dt', 'dd',
-    'table', 'thead', 'tbody', 'tr', 'th', 'td',
-    'a', 'strong', 'em', 'code', 'pre', 'blockquote',
-    'div', 'span', 'img'
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "br",
+    "hr",
+    "ul",
+    "ol",
+    "li",
+    "dl",
+    "dt",
+    "dd",
+    "table",
+    "thead",
+    "tbody",
+    "tr",
+    "th",
+    "td",
+    "a",
+    "strong",
+    "em",
+    "code",
+    "pre",
+    "blockquote",
+    "div",
+    "span",
+    "img",
 ]
 ALLOWED_ATTRIBUTES = {
-    'a': ['href', 'title'],
-    'img': ['src', 'alt', 'title'],
-    'div': ['class'],
-    'span': ['class'],
-    'td': ['colspan', 'rowspan'],
-    'th': ['colspan', 'rowspan']
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title"],
+    "div": ["class"],
+    "span": ["class"],
+    "td": ["colspan", "rowspan"],
+    "th": ["colspan", "rowspan"],
 }
 
 # Import the SOP generator with fallback
 try:
     from automated_sop_generator import SOPType, get_sop_generator
+
     SOP_GENERATOR_AVAILABLE = True
     logger.info("Automated SOP Generator loaded")
 except ImportError as e:
@@ -67,6 +96,7 @@ except ImportError as e:
 # Pydantic models
 class SOPGenerationRequest(BaseModel):
     """Request to generate an SOP"""
+
     title: str = Field(..., min_length=5, max_length=300)
     description: str = Field(..., min_length=20, max_length=5000)
     sop_type: str = Field(default="operational")
@@ -76,8 +106,8 @@ class SOPGenerationRequest(BaseModel):
     include_visuals: bool = True
     include_checklists: bool = True
     include_flowcharts: bool = False
-    related_processes: list[str] = Field(default_factory=list, max_items=10)
-    compliance_requirements: list[str] = Field(default_factory=list, max_items=10)
+    related_processes: list[str] = Field(default_factory=list, max_length=10)
+    compliance_requirements: list[str] = Field(default_factory=list, max_length=10)
     custom_instructions: str = Field(default="", max_length=3000)
     tenant_id: str = Field(default="default")
     author: str = Field(default="system", max_length=200)
@@ -85,7 +115,8 @@ class SOPGenerationRequest(BaseModel):
 
 class SOPFromProcessRequest(BaseModel):
     """Request to generate SOP from process mining"""
-    process_logs: list[dict[str, Any]] = Field(..., min_items=1, max_items=1000)
+
+    process_logs: list[dict[str, Any]] = Field(..., min_length=1, max_length=1000)
     process_name: str = Field(..., min_length=3, max_length=200)
     department: str = Field(default="general", max_length=100)
     tenant_id: str = Field(default="default")
@@ -93,6 +124,7 @@ class SOPFromProcessRequest(BaseModel):
 
 class SOPUpdateRequest(BaseModel):
     """Request to update an SOP"""
+
     title: Optional[str] = Field(None, min_length=5, max_length=300)
     content_updates: Optional[dict[str, Any]] = None
     status: Optional[str] = None
@@ -111,8 +143,8 @@ async def sop_generator_health():
             "template_generation": SOP_GENERATOR_AVAILABLE,
             "version_control": SOP_GENERATOR_AVAILABLE,
             "approval_workflow": SOP_GENERATOR_AVAILABLE,
-            "export_formats": ["markdown", "json", "html"]
-        }
+            "export_formats": ["markdown", "json", "html"],
+        },
     }
 
 
@@ -120,7 +152,7 @@ async def sop_generator_health():
 async def generate_sop(
     request: SOPGenerationRequest,
     background_tasks: BackgroundTasks,
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key),
 ):
     """
     Generate a new SOP using multi-AI pipeline.
@@ -155,7 +187,7 @@ async def generate_sop(
             compliance_requirements=request.compliance_requirements,
             custom_instructions=request.custom_instructions,
             tenant_id=request.tenant_id,
-            author=request.author
+            author=request.author,
         )
 
         return {
@@ -163,7 +195,7 @@ async def generate_sop(
             "sop_id": sop_id,
             "message": "SOP generation queued successfully",
             "estimated_time": _estimate_generation_time(request.complexity_level),
-            "queued_at": datetime.utcnow().isoformat()
+            "queued_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -173,8 +205,7 @@ async def generate_sop(
 
 @router.post("/generate-from-process")
 async def generate_sop_from_process(
-    request: SOPFromProcessRequest,
-    api_key: str = Depends(verify_api_key)
+    request: SOPFromProcessRequest, api_key: str = Depends(verify_api_key)
 ):
     """Generate SOP from process logs (process mining)"""
     if not SOP_GENERATOR_AVAILABLE:
@@ -187,14 +218,14 @@ async def generate_sop_from_process(
             process_logs=request.process_logs,
             process_name=request.process_name,
             department=request.department,
-            tenant_id=request.tenant_id
+            tenant_id=request.tenant_id,
         )
 
         return {
             "status": "generating",
             "sop_id": sop_id,
             "message": "SOP generation from process logs started",
-            "queued_at": datetime.utcnow().isoformat()
+            "queued_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -203,11 +234,7 @@ async def generate_sop_from_process(
 
 
 @router.get("/{sop_id}")
-async def get_sop(
-    sop_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
-):
+async def get_sop(sop_id: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)):
     """Get an SOP by ID"""
     if not SOP_GENERATOR_AVAILABLE:
         raise HTTPException(status_code=503, detail="SOP generator not available")
@@ -234,9 +261,7 @@ async def get_sop(
 
 @router.get("/{sop_id}/status")
 async def get_sop_status(
-    sop_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    sop_id: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """Get the generation status of an SOP"""
     if not SOP_GENERATOR_AVAILABLE:
@@ -260,9 +285,7 @@ async def get_sop_status(
 
 @router.put("/{sop_id}")
 async def update_sop(
-    sop_id: str,
-    request: SOPUpdateRequest,
-    api_key: str = Depends(verify_api_key)
+    sop_id: str, request: SOPUpdateRequest, api_key: str = Depends(verify_api_key)
 ):
     """Update an SOP"""
     if not SOP_GENERATOR_AVAILABLE:
@@ -283,14 +306,14 @@ async def update_sop(
             sop_id=sop_id,
             title=request.title,
             content_updates=request.content_updates,
-            status=request.status
+            status=request.status,
         )
 
         return {
             "status": "updated",
             "sop_id": sop_id,
             "version": updated.get("version"),
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -305,7 +328,7 @@ async def approve_sop(
     sop_id: str,
     tenant_id: str = "default",
     approval_notes: str = "",
-    api_key: str = Depends(verify_approver_key)  # Approver access required!
+    api_key: str = Depends(verify_approver_key),  # Approver access required!
 ):
     """
     Approve an SOP.
@@ -331,16 +354,14 @@ async def approve_sop(
         approved_by = "api_key_holder"  # In production: extract from JWT
 
         await generator.approve_sop(
-            sop_id=sop_id,
-            approved_by=approved_by,
-            approval_notes=approval_notes
+            sop_id=sop_id, approved_by=approved_by, approval_notes=approval_notes
         )
 
         return {
             "status": "approved",
             "sop_id": sop_id,
             "approved_by": approved_by,
-            "approved_at": datetime.utcnow().isoformat()
+            "approved_at": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -352,9 +373,7 @@ async def approve_sop(
 
 @router.post("/{sop_id}/publish")
 async def publish_sop(
-    sop_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_approver_key)
+    sop_id: str, tenant_id: str = "default", api_key: str = Depends(verify_approver_key)
 ):
     """Publish an approved SOP"""
     if not SOP_GENERATOR_AVAILABLE:
@@ -379,7 +398,7 @@ async def publish_sop(
         return {
             "status": "published",
             "sop_id": sop_id,
-            "published_at": datetime.utcnow().isoformat()
+            "published_at": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -391,10 +410,7 @@ async def publish_sop(
 
 @router.get("/{sop_id}/export/{format}")
 async def export_sop(
-    sop_id: str,
-    format: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    sop_id: str, format: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """
     Export SOP in various formats.
@@ -426,18 +442,18 @@ async def export_sop(
                 exported.get("content", ""),
                 tags=ALLOWED_TAGS,
                 attributes=ALLOWED_ATTRIBUTES,
-                strip=True
+                strip=True,
             )
             return Response(
                 content=sanitized,
                 media_type="text/html",
-                headers={"Content-Disposition": f"attachment; filename={sop_id}.html"}
+                headers={"Content-Disposition": f"attachment; filename={sop_id}.html"},
             )
         elif format == "markdown":
             return Response(
                 content=exported.get("content", ""),
                 media_type="text/markdown",
-                headers={"Content-Disposition": f"attachment; filename={sop_id}.md"}
+                headers={"Content-Disposition": f"attachment; filename={sop_id}.md"},
             )
         else:
             return exported
@@ -457,7 +473,7 @@ async def list_sops(
     department: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key),
 ):
     """List SOPs with filtering"""
     if not SOP_GENERATOR_AVAILABLE:
@@ -471,15 +487,10 @@ async def list_sops(
             sop_type=sop_type,
             department=department,
             limit=limit,
-            offset=offset
+            offset=offset,
         )
 
-        return {
-            "sops": sops,
-            "total": len(sops),
-            "limit": limit,
-            "offset": offset
-        }
+        return {"sops": sops, "total": len(sops), "limit": limit, "offset": offset}
 
     except Exception as e:
         logger.error(f"List SOPs error: {e}")
@@ -491,28 +502,36 @@ async def list_sop_types():
     """List available SOP types"""
     return {
         "sop_types": [
-            {"id": "technical", "name": "Technical", "description": "IT and engineering procedures"},
+            {
+                "id": "technical",
+                "name": "Technical",
+                "description": "IT and engineering procedures",
+            },
             {"id": "operational", "name": "Operational", "description": "Day-to-day operations"},
-            {"id": "customer_service", "name": "Customer Service", "description": "Customer support procedures"},
+            {
+                "id": "customer_service",
+                "name": "Customer Service",
+                "description": "Customer support procedures",
+            },
             {"id": "sales", "name": "Sales", "description": "Sales process documentation"},
             {"id": "hr", "name": "HR", "description": "Human resources procedures"},
             {"id": "security", "name": "Security", "description": "Security and compliance"},
-            {"id": "emergency", "name": "Emergency", "description": "Emergency response procedures"},
-            {"id": "onboarding", "name": "Onboarding", "description": "Employee onboarding"}
+            {
+                "id": "emergency",
+                "name": "Emergency",
+                "description": "Emergency response procedures",
+            },
+            {"id": "onboarding", "name": "Onboarding", "description": "Employee onboarding"},
         ],
         "complexity_levels": [
             {"id": "simple", "name": "Simple", "description": "Basic procedures, few steps"},
             {"id": "standard", "name": "Standard", "description": "Moderate complexity"},
-            {"id": "complex", "name": "Complex", "description": "Multi-step, cross-functional"}
-        ]
+            {"id": "complex", "name": "Complex", "description": "Multi-step, cross-functional"},
+        ],
     }
 
 
 def _estimate_generation_time(complexity: str) -> str:
     """Estimate generation time based on complexity"""
-    times = {
-        "simple": "2-3 minutes",
-        "standard": "5-8 minutes",
-        "complex": "10-15 minutes"
-    }
+    times = {"simple": "2-3 minutes", "standard": "5-8 minutes", "complex": "10-15 minutes"}
     return times.get(complexity, "5-8 minutes")

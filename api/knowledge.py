@@ -20,17 +20,20 @@ from config import config
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
+
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
     if not api_key or api_key not in VALID_API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
+
 router = APIRouter(prefix="/api/v1/knowledge-base", tags=["Knowledge Base"])
 
 # Import the knowledge base with fallback
 try:
     from master_knowledge_base import AccessLevel, KnowledgeType, get_knowledge_base
+
     KNOWLEDGE_BASE_AVAILABLE = True
     logger.info("Master Knowledge Base loaded")
 except ImportError as e:
@@ -41,12 +44,13 @@ except ImportError as e:
 # Pydantic models
 class KnowledgeEntryRequest(BaseModel):
     """Request to create a knowledge entry"""
+
     title: str = Field(..., min_length=3, max_length=500)
     content: str = Field(..., min_length=10, max_length=100000)
     knowledge_type: str = Field(default="guide")
     category: str = Field(default="general", max_length=100)
     subcategory: Optional[str] = Field(None, max_length=100)
-    tags: list[str] = Field(default_factory=list, max_items=20)
+    tags: list[str] = Field(default_factory=list, max_length=20)
     access_level: str = Field(default="internal")
     author: str = Field(default="system", max_length=200)
     # Deprecated: kept for backward compatibility with older clients.
@@ -57,6 +61,7 @@ class KnowledgeEntryRequest(BaseModel):
 
 class KnowledgeSearchRequest(BaseModel):
     """Request to search knowledge base"""
+
     query: str = Field(..., min_length=2, max_length=1000)
     knowledge_types: Optional[list[str]] = None
     categories: Optional[list[str]] = None
@@ -69,6 +74,7 @@ class KnowledgeSearchRequest(BaseModel):
 
 class AgentQueryRequest(BaseModel):
     """Request from an AI agent to query knowledge"""
+
     agent_id: str = Field(..., max_length=100)
     query: str = Field(..., min_length=2, max_length=2000)
     context: Optional[str] = Field(None, max_length=5000)
@@ -87,8 +93,8 @@ async def knowledge_base_health():
             "hierarchical_organization": KNOWLEDGE_BASE_AVAILABLE,
             "agent_query_interface": KNOWLEDGE_BASE_AVAILABLE,
             "access_control": KNOWLEDGE_BASE_AVAILABLE,
-            "auto_categorization": KNOWLEDGE_BASE_AVAILABLE
-        }
+            "auto_categorization": KNOWLEDGE_BASE_AVAILABLE,
+        },
     }
 
 
@@ -133,17 +139,23 @@ async def list_entries(
 
         formatted = []
         for entry in page:
-            formatted.append({
-                "entry_id": entry.entry_id,
-                "title": entry.title,
-                "summary": entry.summary or (entry.content[:300] if entry.content else ""),
-                "knowledge_type": entry.knowledge_type.value if hasattr(entry.knowledge_type, "value") else str(entry.knowledge_type),
-                "category": entry.category,
-                "tags": entry.tags,
-                "access_level": entry.access_level.value if hasattr(entry.access_level, "value") else str(entry.access_level),
-                "created_at": entry.created_at.isoformat() if entry.created_at else None,
-                "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
-            })
+            formatted.append(
+                {
+                    "entry_id": entry.entry_id,
+                    "title": entry.title,
+                    "summary": entry.summary or (entry.content[:300] if entry.content else ""),
+                    "knowledge_type": entry.knowledge_type.value
+                    if hasattr(entry.knowledge_type, "value")
+                    else str(entry.knowledge_type),
+                    "category": entry.category,
+                    "tags": entry.tags,
+                    "access_level": entry.access_level.value
+                    if hasattr(entry.access_level, "value")
+                    else str(entry.access_level),
+                    "created_at": entry.created_at.isoformat() if entry.created_at else None,
+                    "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+                }
+            )
 
         return {
             "entries": formatted,
@@ -159,10 +171,7 @@ async def list_entries(
 
 
 @router.post("/entries")
-async def create_entry(
-    request: KnowledgeEntryRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def create_entry(request: KnowledgeEntryRequest, api_key: str = Depends(verify_api_key)):
     """Create a new knowledge entry"""
     if not KNOWLEDGE_BASE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Knowledge base not available")
@@ -205,7 +214,7 @@ async def create_entry(
             "entry_id": entry.entry_id,
             "title": entry.title,
             "category": entry.category,
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -215,9 +224,7 @@ async def create_entry(
 
 @router.get("/entries/{entry_id}")
 async def get_entry(
-    entry_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    entry_id: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """
     Get a knowledge entry by ID.
@@ -249,9 +256,7 @@ async def get_entry(
 
 @router.put("/entries/{entry_id}")
 async def update_entry(
-    entry_id: str,
-    request: KnowledgeEntryRequest,
-    api_key: str = Depends(verify_api_key)
+    entry_id: str, request: KnowledgeEntryRequest, api_key: str = Depends(verify_api_key)
 ):
     """Update a knowledge entry"""
     if not KNOWLEDGE_BASE_AVAILABLE:
@@ -294,7 +299,7 @@ async def update_entry(
         return {
             "status": "updated",
             "entry_id": entry_id,
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -306,9 +311,7 @@ async def update_entry(
 
 @router.delete("/entries/{entry_id}")
 async def delete_entry(
-    entry_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    entry_id: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """Delete a knowledge entry"""
     if not KNOWLEDGE_BASE_AVAILABLE:
@@ -324,7 +327,7 @@ async def delete_entry(
         return {
             "status": "deleted",
             "entry_id": entry_id,
-            "deleted_at": datetime.utcnow().isoformat()
+            "deleted_at": datetime.utcnow().isoformat(),
         }
 
     except HTTPException:
@@ -335,10 +338,7 @@ async def delete_entry(
 
 
 @router.post("/search")
-async def search_knowledge(
-    request: KnowledgeSearchRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def search_knowledge(request: KnowledgeSearchRequest, api_key: str = Depends(verify_api_key)):
     """Search the knowledge base with semantic search"""
     if not KNOWLEDGE_BASE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Knowledge base not available")
@@ -367,24 +367,26 @@ async def search_knowledge(
 
         formatted = []
         for entry, score in results:
-            formatted.append({
-                "entry_id": entry.entry_id,
-                "title": entry.title,
-                "summary": entry.summary or entry.content[:300],
-                "score": score,
-                "knowledge_type": entry.knowledge_type.value,
-                "category": entry.category,
-                "tags": entry.tags,
-                "access_level": entry.access_level.value,
-                "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
-            })
+            formatted.append(
+                {
+                    "entry_id": entry.entry_id,
+                    "title": entry.title,
+                    "summary": entry.summary or entry.content[:300],
+                    "score": score,
+                    "knowledge_type": entry.knowledge_type.value,
+                    "category": entry.category,
+                    "tags": entry.tags,
+                    "access_level": entry.access_level.value,
+                    "updated_at": entry.updated_at.isoformat() if entry.updated_at else None,
+                }
+            )
 
         return {
             "query": request.query,
             "results": formatted,
             "total": len(formatted),
             "semantic_search": request.semantic_search,
-            "searched_at": datetime.utcnow().isoformat()
+            "searched_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -393,10 +395,7 @@ async def search_knowledge(
 
 
 @router.post("/agent/query")
-async def agent_query(
-    request: AgentQueryRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def agent_query(request: AgentQueryRequest, api_key: str = Depends(verify_api_key)):
     """
     Query interface for AI agents.
 
@@ -411,13 +410,15 @@ async def agent_query(
 
         # MasterKnowledgeBase does not currently support tenant scoping or required_types.
         context = {"text": request.context} if request.context else None
-        response = await kb.query_for_agent(agent_id=request.agent_id, query=request.query, context=context)
+        response = await kb.query_for_agent(
+            agent_id=request.agent_id, query=request.query, context=context
+        )
 
         return {
             "agent_id": request.agent_id,
             "query": request.query,
             "response": response,
-            "queried_at": datetime.utcnow().isoformat()
+            "queried_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -426,10 +427,7 @@ async def agent_query(
 
 
 @router.get("/categories")
-async def list_categories(
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
-):
+async def list_categories(tenant_id: str = "default", api_key: str = Depends(verify_api_key)):
     """List all knowledge categories"""
     if not KNOWLEDGE_BASE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Knowledge base not available")
@@ -459,10 +457,7 @@ async def list_categories(
 
 
 @router.get("/statistics")
-async def get_statistics(
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
-):
+async def get_statistics(tenant_id: str = "default", api_key: str = Depends(verify_api_key)):
     """Get knowledge base statistics"""
     if not KNOWLEDGE_BASE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Knowledge base not available")
@@ -471,10 +466,7 @@ async def get_statistics(
         kb = get_knowledge_base()
         stats = await kb.get_statistics()
 
-        return {
-            "statistics": stats,
-            "generated_at": datetime.utcnow().isoformat()
-        }
+        return {"statistics": stats, "generated_at": datetime.utcnow().isoformat()}
 
     except Exception as e:
         logger.error(f"Statistics error: {e}")

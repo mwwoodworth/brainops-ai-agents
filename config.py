@@ -195,7 +195,7 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.32.0"
+            "VERSION", "v11.33.0"
         )  # RevenueOptimizer JSON serialization fix, ecosystem-wide bug fixes
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")

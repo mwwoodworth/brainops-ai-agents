@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class InvoiceStatus(str, Enum):
@@ -25,8 +25,7 @@ class InvoiceLineItem(BaseModel):
     unit_of_measure: Optional[str] = None
     taxable: Optional[bool] = None
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 class Invoice(BaseModel):
@@ -53,5 +52,4 @@ class Invoice(BaseModel):
     line_items: Optional[List[InvoiceLineItem]] = None
     metadata: Optional[Dict[str, Any]] = None
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")

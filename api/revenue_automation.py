@@ -11,17 +11,21 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
 # API Key Security
 try:
     from config import config
+
     VALID_API_KEYS = config.security.valid_api_keys
 except (ImportError, AttributeError):
     import os
-    fallback_key = os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY") or os.getenv("API_KEY")
+
+    fallback_key = (
+        os.getenv("BRAINOPS_API_KEY") or os.getenv("AGENTS_API_KEY") or os.getenv("API_KEY")
+    )
     VALID_API_KEYS = {fallback_key} if fallback_key else set()
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -35,7 +39,7 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
 
 
 # Email validation regex
-EMAIL_REGEX = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
 
 router = APIRouter(prefix="/revenue", tags=["Revenue Automation"])
 
@@ -47,6 +51,7 @@ async def _get_engine():
     global _engine, _initialized
     if _engine is None:
         from revenue_automation_engine import RevenueAutomationEngine
+
         _engine = RevenueAutomationEngine()
 
     if not _initialized:
@@ -58,6 +63,7 @@ async def _get_engine():
 
 class LeadCaptureRequest(BaseModel):
     """Request model for capturing leads with validation"""
+
     email: str = Field(..., min_length=5, max_length=255, description="Valid email address")
     name: str = Field(..., min_length=1, max_length=200, description="Lead name")
     industry: str = Field(..., min_length=2, max_length=50, description="Industry type")
@@ -66,69 +72,100 @@ class LeadCaptureRequest(BaseModel):
     company: Optional[str] = Field(None, max_length=200, description="Company name")
     custom_fields: Optional[dict[str, Any]] = Field(default_factory=dict)
 
-    @validator('email')
+    @field_validator("email")
+    @classmethod
     def validate_email(cls, v):
         if not EMAIL_REGEX.match(v):
-            raise ValueError('Invalid email format')
+            raise ValueError("Invalid email format")
         return v.lower().strip()
 
-    @validator('name')
+    @field_validator("name")
+    @classmethod
     def validate_name(cls, v):
         if not v or not v.strip():
-            raise ValueError('Name cannot be empty')
+            raise ValueError("Name cannot be empty")
         return v.strip()
 
-    @validator('industry')
+    @field_validator("industry")
+    @classmethod
     def validate_industry(cls, v):
         valid_industries = {
-            'roofing', 'solar', 'hvac', 'plumbing', 'electrical',
-            'landscaping', 'construction', 'home_services', 'saas',
-            'ecommerce', 'consulting', 'real_estate', 'insurance',
-            'automotive', 'healthcare', 'generic'
+            "roofing",
+            "solar",
+            "hvac",
+            "plumbing",
+            "electrical",
+            "landscaping",
+            "construction",
+            "home_services",
+            "saas",
+            "ecommerce",
+            "consulting",
+            "real_estate",
+            "insurance",
+            "automotive",
+            "healthcare",
+            "generic",
         }
         v_lower = v.lower().strip()
         if v_lower not in valid_industries:
             # Allow but log unknown industries
             logger.warning(f"Unknown industry: {v_lower}, using 'generic'")
-            return 'generic'
+            return "generic"
         return v_lower
 
-    @validator('source')
+    @field_validator("source")
+    @classmethod
     def validate_source(cls, v):
         valid_sources = {
-            'website', 'referral', 'google_ads', 'facebook', 'instagram',
-            'linkedin', 'cold_outreach', 'partnership', 'organic_search',
-            'direct', 'api', 'manual'
+            "website",
+            "referral",
+            "google_ads",
+            "facebook",
+            "instagram",
+            "linkedin",
+            "cold_outreach",
+            "partnership",
+            "organic_search",
+            "direct",
+            "api",
+            "manual",
         }
         v_lower = v.lower().strip()
         if v_lower not in valid_sources:
-            return 'direct'  # Default to direct
+            return "direct"  # Default to direct
         return v_lower
 
 
 class QualifyLeadRequest(BaseModel):
     """Request model for lead qualification"""
+
     qualification_data: dict[str, Any] = Field(..., description="Qualification criteria")
 
-    @validator('qualification_data')
+    @field_validator("qualification_data")
+    @classmethod
     def validate_qualification_data(cls, v):
         if not v:
-            raise ValueError('Qualification data cannot be empty')
+            raise ValueError("Qualification data cannot be empty")
         return v
 
 
 class PaymentLinkRequest(BaseModel):
     """Request model for creating payment links with validation"""
+
     amount: float = Field(..., gt=0, le=1000000, description="Payment amount in USD")
-    product_service: str = Field(..., min_length=2, max_length=200, description="Product or service name")
+    product_service: str = Field(
+        ..., min_length=2, max_length=200, description="Product or service name"
+    )
     description: Optional[str] = Field(None, max_length=1000, description="Payment description")
 
-    @validator('amount')
+    @field_validator("amount")
+    @classmethod
     def validate_amount(cls, v):
         if v <= 0:
-            raise ValueError('Amount must be greater than 0')
+            raise ValueError("Amount must be greater than 0")
         if v > 1000000:
-            raise ValueError('Amount exceeds maximum limit')
+            raise ValueError("Amount exceeds maximum limit")
         # Round to 2 decimal places
         return round(v, 2)
 
@@ -153,12 +190,18 @@ async def get_revenue_status():
                 "outreach_automation",
                 "payment_processing",
                 "revenue_tracking",
-                "multi_industry"
+                "multi_industry",
             ],
             "supported_industries": [
-                "roofing", "solar", "hvac", "saas", "ecommerce",
-                "consulting", "construction", "home_services"
-            ]
+                "roofing",
+                "solar",
+                "hvac",
+                "saas",
+                "ecommerce",
+                "consulting",
+                "construction",
+                "home_services",
+            ],
         }
     except Exception as e:
         logger.error(f"Revenue status error: {e}")
@@ -190,7 +233,7 @@ async def capture_lead(request: LeadCaptureRequest, api_key: str = Depends(verif
             source=request.source,
             phone=request.phone,
             company=request.company,
-            custom_fields=request.custom_fields
+            custom_fields=request.custom_fields,
         )
         return result
     except Exception as e:
@@ -208,7 +251,7 @@ async def create_lead(request: LeadCaptureRequest, api_key: str = Depends(verify
 async def list_leads(
     status: Optional[str] = None,
     industry: Optional[str] = None,
-    limit: int = Query(100, ge=1, le=1000)
+    limit: int = Query(100, ge=1, le=1000),
 ):
     """List leads in the pipeline"""
     try:
@@ -221,18 +264,20 @@ async def list_leads(
             if industry and lead.industry.value != industry:
                 continue
 
-            leads.append({
-                "lead_id": lead.lead_id,
-                "email": lead.email,
-                "name": lead.name,
-                "company": lead.company,
-                "industry": lead.industry.value,
-                "source": lead.source.value,
-                "status": lead.status.value,
-                "score": lead.score,
-                "estimated_value": float(lead.estimated_value),
-                "created_at": lead.created_at
-            })
+            leads.append(
+                {
+                    "lead_id": lead.lead_id,
+                    "email": lead.email,
+                    "name": lead.name,
+                    "company": lead.company,
+                    "industry": lead.industry.value,
+                    "source": lead.source.value,
+                    "status": lead.status.value,
+                    "score": lead.score,
+                    "estimated_value": float(lead.estimated_value),
+                    "created_at": lead.created_at,
+                }
+            )
 
         return {"leads": leads, "total": len(leads)}
     except Exception as e:
@@ -267,7 +312,7 @@ async def get_lead(lead_id: str):
             "converted_at": lead.converted_at,
             "custom_fields": lead.custom_fields,
             "automation_history": lead.automation_history[-10:],
-            "notes": lead.notes
+            "notes": lead.notes,
         }
     except HTTPException:
         raise
@@ -277,7 +322,9 @@ async def get_lead(lead_id: str):
 
 
 @router.post("/leads/{lead_id}/qualify")
-async def qualify_lead(lead_id: str, request: QualifyLeadRequest, api_key: str = Depends(verify_api_key)):
+async def qualify_lead(
+    lead_id: str, request: QualifyLeadRequest, api_key: str = Depends(verify_api_key)
+):
     """Qualify a lead with additional data. Requires API key authentication."""
     try:
         engine = await _get_engine()
@@ -289,7 +336,9 @@ async def qualify_lead(lead_id: str, request: QualifyLeadRequest, api_key: str =
 
 
 @router.post("/leads/{lead_id}/payment-link")
-async def create_payment_link(lead_id: str, request: PaymentLinkRequest, api_key: str = Depends(verify_api_key)):
+async def create_payment_link(
+    lead_id: str, request: PaymentLinkRequest, api_key: str = Depends(verify_api_key)
+):
     """Create a payment link for a lead. Requires API key authentication."""
     try:
         engine = await _get_engine()
@@ -297,7 +346,7 @@ async def create_payment_link(lead_id: str, request: PaymentLinkRequest, api_key
             lead_id=lead_id,
             amount=request.amount,
             product_service=request.product_service,
-            description=request.description
+            description=request.description,
         )
         return result
     except Exception as e:
@@ -352,18 +401,18 @@ async def get_revenue_dashboard():
                 "total_revenue": metrics["total_revenue"],
                 "monthly_revenue": metrics["monthly_revenue"],
                 "pipeline_value": metrics["pipeline_value"],
-                "conversion_rate": metrics["conversion_rate"]
+                "conversion_rate": metrics["conversion_rate"],
             },
             "leads": {
                 "total": metrics["total_leads"],
                 "qualified": metrics["qualified_leads"],
-                "won": metrics["won_leads"]
+                "won": metrics["won_leads"],
             },
             "pipeline": pipeline["leads_by_stage"],
             "value_by_stage": pipeline["value_by_stage"],
             "by_industry": metrics["revenue_by_industry"],
             "by_source": metrics["revenue_by_source"],
-            "system_status": "operational"
+            "system_status": "operational",
         }
     except Exception as e:
         logger.error(f"Dashboard error: {e}")

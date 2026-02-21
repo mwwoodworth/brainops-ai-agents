@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,8 @@ from config import config
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 # Admin keys: keys containing 'prod' are considered admin keys
-ADMIN_API_KEYS = {k for k in config.security.valid_api_keys if 'prod' in k.lower()}
+ADMIN_API_KEYS = {k for k in config.security.valid_api_keys if "prod" in k.lower()}
+
 
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
@@ -28,17 +29,20 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
+
 async def verify_admin_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify admin API key for sensitive operations"""
     if not api_key or api_key not in ADMIN_API_KEYS:
         raise HTTPException(status_code=403, detail="Admin access required")
     return api_key
 
+
 router = APIRouter(prefix="/affiliate", tags=["Affiliate & Partnerships"])
 
 # Import the affiliate pipeline with fallback
 try:
     from affiliate_partnership_pipeline import PartnerType, get_affiliate_pipeline
+
     AFFILIATE_PIPELINE_AVAILABLE = True
     logger.info("Affiliate Partnership Pipeline loaded")
 except ImportError as e:
@@ -49,25 +53,28 @@ except ImportError as e:
 # Pydantic models
 class AffiliateRegistrationRequest(BaseModel):
     """Request to register as an affiliate"""
+
     name: str = Field(..., min_length=2, max_length=200)
     email: str = Field(..., max_length=255)
     company: Optional[str] = Field(None, max_length=200)
     website: Optional[str] = Field(None, max_length=500)
     partner_type: str = Field(default="affiliate")
-    marketing_channels: list[str] = Field(default_factory=list, max_items=10)
+    marketing_channels: list[str] = Field(default_factory=list, max_length=10)
     expected_monthly_referrals: int = Field(default=10, ge=1, le=100000)
     notes: Optional[str] = Field(None, max_length=2000)
     tenant_id: str = Field(default="default")
 
-    @validator('email')
+    @field_validator("email")
+    @classmethod
     def validate_email(cls, v):
-        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
-            raise ValueError('Invalid email format')
+        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
+            raise ValueError("Invalid email format")
         return v
 
 
 class AffiliateResponse(BaseModel):
     """Response with affiliate details"""
+
     affiliate_id: str
     name: str
     email: str
@@ -81,6 +88,7 @@ class AffiliateResponse(BaseModel):
 
 class ClickTrackRequest(BaseModel):
     """Request to track a referral click"""
+
     referral_code: str = Field(..., min_length=6, max_length=50)
     source_url: str = Field(..., max_length=2000)
     ip_address: Optional[str] = Field(None, max_length=45)
@@ -90,6 +98,7 @@ class ClickTrackRequest(BaseModel):
 
 class ConversionRequest(BaseModel):
     """Request to track a conversion"""
+
     referral_code: str = Field(..., min_length=6, max_length=50)
     order_id: str = Field(..., max_length=100)
     amount: float = Field(..., gt=0, le=1000000)
@@ -111,15 +120,14 @@ async def affiliate_health():
             "commission_calculation": AFFILIATE_PIPELINE_AVAILABLE,
             "payout_processing": AFFILIATE_PIPELINE_AVAILABLE,
             "fraud_detection": AFFILIATE_PIPELINE_AVAILABLE,
-            "content_generation": AFFILIATE_PIPELINE_AVAILABLE
-        }
+            "content_generation": AFFILIATE_PIPELINE_AVAILABLE,
+        },
     }
 
 
 @router.post("/register", response_model=AffiliateResponse)
 async def register_affiliate(
-    request: AffiliateRegistrationRequest,
-    api_key: str = Depends(verify_api_key)
+    request: AffiliateRegistrationRequest, api_key: str = Depends(verify_api_key)
 ):
     """Register a new affiliate partner"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -144,20 +152,28 @@ async def register_affiliate(
                 "marketing_channels": request.marketing_channels,
                 "expected_monthly_referrals": request.expected_monthly_referrals,
                 "notes": request.notes,
-                "tenant_id": request.tenant_id
-            }
+                "tenant_id": request.tenant_id,
+            },
         )
 
         return AffiliateResponse(
             affiliate_id=affiliate.affiliate_id,
             name=affiliate.contact_name,
             email=affiliate.email,
-            partner_type=affiliate.partner_type.value if hasattr(affiliate.partner_type, 'value') else str(affiliate.partner_type),
-            tier=affiliate.tier.value if hasattr(affiliate.tier, 'value') else str(affiliate.tier),
+            partner_type=affiliate.partner_type.value
+            if hasattr(affiliate.partner_type, "value")
+            else str(affiliate.partner_type),
+            tier=affiliate.tier.value if hasattr(affiliate.tier, "value") else str(affiliate.tier),
             referral_code=affiliate.affiliate_code,
-            commission_rate=float(affiliate.custom_commission_rate) if affiliate.custom_commission_rate else 0.20,  # Default 20%
-            status=affiliate.status.value if hasattr(affiliate.status, 'value') else str(affiliate.status),
-            created_at=affiliate.joined_date.isoformat() if hasattr(affiliate.joined_date, 'isoformat') else str(affiliate.joined_date)
+            commission_rate=float(affiliate.custom_commission_rate)
+            if affiliate.custom_commission_rate
+            else 0.20,  # Default 20%
+            status=affiliate.status.value
+            if hasattr(affiliate.status, "value")
+            else str(affiliate.status),
+            created_at=affiliate.joined_date.isoformat()
+            if hasattr(affiliate.joined_date, "isoformat")
+            else str(affiliate.joined_date),
         )
 
     except Exception as e:
@@ -166,10 +182,7 @@ async def register_affiliate(
 
 
 @router.post("/track/click")
-async def track_click(
-    request: ClickTrackRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def track_click(request: ClickTrackRequest, api_key: str = Depends(verify_api_key)):
     """Track a referral click"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Affiliate system not available")
@@ -182,14 +195,14 @@ async def track_click(
             source_url=request.source_url,
             ip_address=request.ip_address,
             user_agent=request.user_agent,
-            landing_page=request.landing_page
+            landing_page=request.landing_page,
         )
 
         return {
             "status": "tracked",
             "click_id": result.get("click_id"),
             "fraud_signals": result.get("fraud_signals", []),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -198,10 +211,7 @@ async def track_click(
 
 
 @router.post("/track/conversion")
-async def track_conversion(
-    request: ConversionRequest,
-    api_key: str = Depends(verify_api_key)
-):
+async def track_conversion(request: ConversionRequest, api_key: str = Depends(verify_api_key)):
     """Track a conversion and calculate commission"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
         raise HTTPException(status_code=503, detail="Affiliate system not available")
@@ -215,7 +225,7 @@ async def track_conversion(
             amount=request.amount,
             product_id=request.product_id,
             customer_email=request.customer_email,
-            metadata=request.metadata
+            metadata=request.metadata,
         )
 
         return {
@@ -224,10 +234,10 @@ async def track_conversion(
             "commission": {
                 "amount": result.get("commission_amount"),
                 "rate": result.get("commission_rate"),
-                "tier": result.get("affiliate_tier")
+                "tier": result.get("affiliate_tier"),
             },
             "fraud_check": result.get("fraud_status", "passed"),
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -237,9 +247,7 @@ async def track_conversion(
 
 @router.get("/dashboard/{affiliate_id}")
 async def get_affiliate_dashboard(
-    affiliate_id: str,
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    affiliate_id: str, tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """Get affiliate dashboard data"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -266,7 +274,7 @@ async def get_affiliate_stats(
     affiliate_id: str,
     period: str = "30d",
     tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key),
 ):
     """Get affiliate performance statistics"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -289,7 +297,7 @@ async def generate_affiliate_content(
     content_type: str = "social_media",
     product_id: Optional[str] = None,
     tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key),
 ):
     """Generate marketing content for an affiliate"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -301,14 +309,14 @@ async def generate_affiliate_content(
             affiliate_id=affiliate_id,
             content_type=content_type,
             product_id=product_id,
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         return {
             "affiliate_id": affiliate_id,
             "content_type": content_type,
             "content": content,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -318,8 +326,7 @@ async def generate_affiliate_content(
 
 @router.get("/commissions/pending")
 async def get_pending_commissions(
-    tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    tenant_id: str = "default", api_key: str = Depends(verify_api_key)
 ):
     """Get pending commissions awaiting payout"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -332,7 +339,7 @@ async def get_pending_commissions(
         return {
             "pending_commissions": commissions,
             "total_pending": sum(c.get("amount", 0) for c in commissions),
-            "count": len(commissions)
+            "count": len(commissions),
         }
 
     except Exception as e:
@@ -344,7 +351,7 @@ async def get_pending_commissions(
 async def process_payouts(
     affiliate_ids: Optional[list[str]] = None,
     tenant_id: str = "default",
-    api_key: str = Depends(verify_admin_key)  # Admin only!
+    api_key: str = Depends(verify_admin_key),  # Admin only!
 ):
     """
     Process pending payouts for affiliates.
@@ -362,7 +369,7 @@ async def process_payouts(
             "status": "processed",
             "payouts": payouts,
             "total_paid": sum(p.get("amount", 0) for p in payouts),
-            "processed_at": datetime.utcnow().isoformat()
+            "processed_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:
@@ -375,7 +382,7 @@ async def get_affiliate_leaderboard(
     period: str = "30d",
     limit: int = 10,
     tenant_id: str = "default",
-    api_key: str = Depends(verify_api_key)
+    api_key: str = Depends(verify_api_key),
 ):
     """Get top performing affiliates"""
     if not AFFILIATE_PIPELINE_AVAILABLE:
@@ -388,7 +395,7 @@ async def get_affiliate_leaderboard(
         return {
             "period": period,
             "leaderboard": leaderboard,
-            "generated_at": datetime.utcnow().isoformat()
+            "generated_at": datetime.utcnow().isoformat(),
         }
 
     except Exception as e:

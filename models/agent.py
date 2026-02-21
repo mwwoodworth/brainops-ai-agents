@@ -6,11 +6,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 
 class AgentCategory(str, Enum):
     """Agent category enumeration"""
+
     SALES = "sales"
     MARKETING = "marketing"
     OPERATIONS = "operations"
@@ -25,6 +26,7 @@ class AgentCategory(str, Enum):
 
 class AgentCapability(BaseModel):
     """Agent capability model"""
+
     name: str = Field(..., min_length=1, max_length=100)
     description: str = Field(default="", max_length=500)
     enabled: bool = Field(default=True)
@@ -33,6 +35,7 @@ class AgentCapability(BaseModel):
 
 class Agent(BaseModel):
     """AI Agent model"""
+
     id: str = Field(..., description="Unique agent identifier")
     name: str = Field(..., min_length=1, max_length=255)
     category: AgentCategory
@@ -48,28 +51,26 @@ class Agent(BaseModel):
     total_executions: Optional[int] = Field(default=0, description="Total executions")
     last_active: Optional[datetime] = Field(default=None, description="Last active timestamp")
 
-    @validator("id")
+    @field_validator("id")
+    @classmethod
     def validate_id(cls, v: str) -> str:
         """Validate agent ID format"""
         if not v or len(v) < 3:
             raise ValueError("Agent ID must be at least 3 characters")
         return v
 
-    @validator("capabilities")
+    @field_validator("capabilities")
+    @classmethod
     def validate_capabilities(cls, v: list[AgentCapability]) -> list[AgentCapability]:
         """Validate agent has at least one capability if enabled"""
         return v
 
-    class Config:
-        """Pydantic config"""
-        use_enum_values = True
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class AgentExecution(BaseModel):
     """Agent execution result model"""
+
     agent_id: str = Field(..., description="Agent ID")
     agent_name: str = Field(..., min_length=1)
     execution_id: str = Field(..., description="Unique execution ID")
@@ -81,7 +82,8 @@ class AgentExecution(BaseModel):
     error: Optional[str] = None
     duration_ms: Optional[int] = None
 
-    @validator("status")
+    @field_validator("status")
+    @classmethod
     def validate_status(cls, v: str) -> str:
         """Validate execution status"""
         valid_statuses = {"pending", "running", "completed", "failed", "cancelled"}
@@ -89,23 +91,21 @@ class AgentExecution(BaseModel):
             raise ValueError(f"Status must be one of {valid_statuses}")
         return v
 
-    class Config:
-        """Pydantic config"""
-        json_encoders = {
-            datetime: lambda v: v.isoformat() if v else None
-        }
+    model_config = ConfigDict()
 
 
 class AgentList(BaseModel):
     """Agent list response model"""
+
     agents: list[Agent]
     total: int = Field(..., ge=0)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=50, ge=1, le=100)
 
-    @validator("total")
-    def validate_total(cls, v: int, values: dict[str, Any]) -> int:
+    @field_validator("total")
+    @classmethod
+    def validate_total(cls, v: int, info: ValidationInfo) -> int:
         """Validate total matches agents list if full list"""
-        if "agents" in values and v < len(values["agents"]):
+        if "agents" in info.data and v < len(info.data["agents"]):
             raise ValueError("Total cannot be less than agents list length")
         return v

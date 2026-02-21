@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -27,66 +27,72 @@ router = APIRouter(prefix="/workflows", tags=["Advanced Workflows"])
 # REQUEST/RESPONSE MODELS
 # =============================================================================
 
+
 class WorkflowStartRequest(BaseModel):
     """Request to start a new workflow."""
+
     workflow_type: str = Field(..., description="Type of workflow to start")
     initial_state: dict[str, Any] = Field(default_factory=dict, description="Initial state data")
     tenant_id: Optional[str] = Field(None, description="Tenant ID for multi-tenancy")
     timeout_seconds: int = Field(300, ge=10, le=3600, description="Execution timeout in seconds")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "workflow_type": "customer_onboarding",
                 "initial_state": {
                     "customer_id": "cust-123",
                     "customer_name": "Acme Corp",
-                    "customer_email": "contact@acme.com"
+                    "customer_email": "contact@acme.com",
                 },
                 "tenant_id": "tenant-abc",
-                "timeout_seconds": 300
+                "timeout_seconds": 300,
             }
         }
+    )
 
 
 class WorkflowResumeRequest(BaseModel):
     """Request to resume a paused workflow."""
+
     workflow_id: str = Field(..., description="ID of workflow to resume")
-    additional_state: Optional[dict[str, Any]] = Field(None, description="Additional state to merge")
+    additional_state: Optional[dict[str, Any]] = Field(
+        None, description="Additional state to merge"
+    )
     timeout_seconds: int = Field(300, ge=10, le=3600, description="Execution timeout")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "workflow_id": "wf-abc123",
-                "additional_state": {
-                    "metadata": {
-                        "human_decision": "approve"
-                    }
-                },
-                "timeout_seconds": 300
+                "additional_state": {"metadata": {"human_decision": "approve"}},
+                "timeout_seconds": 300,
             }
         }
+    )
 
 
 class ApprovalSubmitRequest(BaseModel):
     """Request to submit human approval."""
+
     request_id: str = Field(..., description="Approval request ID")
     response: str = Field(..., description="Approval response (must match available options)")
     responded_by: str = Field(..., description="User/system submitting the approval")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "request_id": "apr-xyz789",
                 "response": "approve",
-                "responded_by": "user@example.com"
+                "responded_by": "user@example.com",
             }
         }
+    )
 
 
 class WorkflowResponse(BaseModel):
     """Standard workflow response."""
+
     workflow_id: str
     status: str
     result: Optional[dict[str, Any]] = None
@@ -98,6 +104,7 @@ class WorkflowResponse(BaseModel):
 
 class ApprovalRequest(BaseModel):
     """Human approval request."""
+
     request_id: str
     workflow_id: str
     node_name: str
@@ -110,6 +117,7 @@ class ApprovalRequest(BaseModel):
 
 class WorkflowStatusResponse(BaseModel):
     """Workflow status response."""
+
     workflow_id: str
     workflow_type: Optional[str] = None
     status: str
@@ -123,6 +131,7 @@ class WorkflowStatusResponse(BaseModel):
 
 class WorkflowTypeInfo(BaseModel):
     """Information about a workflow type."""
+
     type: str
     breakpoints: list[str] = []
 
@@ -140,12 +149,13 @@ def get_engine():
     if _engine is None:
         try:
             from langgraph_workflow_engine import get_workflow_engine
+
             _engine = get_workflow_engine()
         except ImportError as e:
             logger.error(f"Failed to import workflow engine: {e}")
             raise HTTPException(
                 status_code=503,
-                detail="Workflow engine not available. LangGraph dependencies may be missing."
+                detail="Workflow engine not available. LangGraph dependencies may be missing.",
             )
     return _engine
 
@@ -153,6 +163,7 @@ def get_engine():
 # =============================================================================
 # WORKFLOW MANAGEMENT ENDPOINTS
 # =============================================================================
+
 
 @router.get("/types", response_model=list[WorkflowTypeInfo])
 async def list_workflow_types():
@@ -192,7 +203,7 @@ async def start_workflow(request: WorkflowStartRequest):
             workflow_type=request.workflow_type,
             initial_state=request.initial_state,
             tenant_id=request.tenant_id,
-            timeout_seconds=request.timeout_seconds
+            timeout_seconds=request.timeout_seconds,
         )
 
         if "error" in result and result.get("status") == "failed":
@@ -222,7 +233,7 @@ async def resume_workflow(request: WorkflowResumeRequest):
         result = await engine.resume_workflow(
             workflow_id=request.workflow_id,
             additional_state=request.additional_state,
-            timeout_seconds=request.timeout_seconds
+            timeout_seconds=request.timeout_seconds,
         )
 
         if "error" in result and result.get("status") == "failed":
@@ -260,10 +271,11 @@ async def get_workflow_status(workflow_id: str):
 # HUMAN-IN-THE-LOOP ENDPOINTS
 # =============================================================================
 
+
 @router.get("/approvals/pending", response_model=list[ApprovalRequest])
 async def get_pending_approvals(
     tenant_id: Optional[str] = Query(None, description="Filter by tenant"),
-    workflow_type: Optional[str] = Query(None, description="Filter by workflow type")
+    workflow_type: Optional[str] = Query(None, description="Filter by workflow type"),
 ):
     """
     Get all pending human approval requests.
@@ -276,8 +288,7 @@ async def get_pending_approvals(
         await engine.initialize()
 
         approvals = await engine.get_pending_approvals(
-            tenant_id=tenant_id,
-            workflow_type=workflow_type
+            tenant_id=tenant_id, workflow_type=workflow_type
         )
 
         return [ApprovalRequest(**a) for a in approvals]
@@ -304,17 +315,19 @@ async def submit_approval(request: ApprovalSubmitRequest):
         result = await engine.submit_approval(
             request_id=request.request_id,
             response=request.response,
-            responded_by=request.responded_by
+            responded_by=request.responded_by,
         )
 
         if not result.get("success"):
-            raise HTTPException(status_code=400, detail=result.get("error", "Failed to submit approval"))
+            raise HTTPException(
+                status_code=400, detail=result.get("error", "Failed to submit approval")
+            )
 
         return {
             "success": True,
             "message": f"Approval submitted: {request.response}",
             "workflow_id": result.get("workflow_id"),
-            "next_step": "Use /workflows/resume to continue the workflow"
+            "next_step": "Use /workflows/resume to continue the workflow",
         }
 
     except HTTPException:
@@ -328,6 +341,7 @@ async def submit_approval(request: ApprovalSubmitRequest):
 # WORKFLOW TEMPLATE ENDPOINTS
 # =============================================================================
 
+
 @router.post("/onboarding/start", response_model=WorkflowResponse)
 async def start_customer_onboarding(
     customer_id: str,
@@ -335,7 +349,7 @@ async def start_customer_onboarding(
     customer_email: str,
     tenant_id: Optional[str] = None,
     has_import_data: bool = False,
-    training_requested: bool = True
+    training_requested: bool = True,
 ):
     """
     Start a customer onboarding workflow.
@@ -363,10 +377,10 @@ async def start_customer_onboarding(
                 "customer_email": customer_email,
                 "metadata": {
                     "has_import_data": has_import_data,
-                    "training_requested": training_requested
-                }
+                    "training_requested": training_requested,
+                },
             },
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         return WorkflowResponse(**result)
@@ -378,11 +392,7 @@ async def start_customer_onboarding(
 
 @router.post("/collection/start", response_model=WorkflowResponse)
 async def start_invoice_collection(
-    invoice_id: str,
-    customer_id: str,
-    amount: float,
-    due_date: str,
-    tenant_id: Optional[str] = None
+    invoice_id: str, customer_id: str, amount: float, due_date: str, tenant_id: Optional[str] = None
 ):
     """
     Start an invoice collection workflow.
@@ -407,9 +417,9 @@ async def start_invoice_collection(
                 "invoice_id": invoice_id,
                 "customer_id": customer_id,
                 "amount": amount,
-                "due_date": due_date
+                "due_date": due_date,
             },
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         return WorkflowResponse(**result)
@@ -429,7 +439,7 @@ async def start_lead_qualification(
     budget_range: Optional[str] = None,
     timeline: Optional[str] = None,
     lead_source: str = "website",
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
 ):
     """
     Start a lead qualification workflow.
@@ -461,9 +471,9 @@ async def start_lead_qualification(
                 "company_size": company_size,
                 "budget_range": budget_range,
                 "timeline": timeline,
-                "lead_source": lead_source
+                "lead_source": lead_source,
             },
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         return WorkflowResponse(**result)
@@ -480,7 +490,7 @@ async def start_system_healing(
     error_message: str,
     component: str,
     severity: str = "medium",
-    tenant_id: Optional[str] = None
+    tenant_id: Optional[str] = None,
 ):
     """
     Start a system healing workflow.
@@ -513,9 +523,9 @@ async def start_system_healing(
                 "error_type": error_type,
                 "error_message": error_message,
                 "component": component,
-                "severity": severity
+                "severity": severity,
             },
-            tenant_id=tenant_id
+            tenant_id=tenant_id,
         )
 
         return WorkflowResponse(**result)
@@ -528,6 +538,7 @@ async def start_system_healing(
 # =============================================================================
 # HEALTH & MONITORING
 # =============================================================================
+
 
 @router.get("/health")
 async def workflow_engine_health():
@@ -548,21 +559,20 @@ async def workflow_engine_health():
             "engine_initialized": initialized,
             "pending_approvals": len(pending),
             "available_workflow_types": list(engine._templates.keys()),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
     except Exception as e:
         return {
             "status": "unhealthy",
             "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
 
 @router.get("/metrics")
 async def workflow_metrics(
-    tenant_id: Optional[str] = Query(None),
-    hours: int = Query(24, ge=1, le=168)
+    tenant_id: Optional[str] = Query(None), hours: int = Query(24, ge=1, le=168)
 ):
     """
     Get workflow execution metrics.
@@ -578,16 +588,20 @@ async def workflow_metrics(
 
         async with pool.acquire() as conn:
             # Get checkpoint stats (active workflows)
-            checkpoint_stats = await conn.fetchrow("""
+            checkpoint_stats = await conn.fetchrow(
+                """
                 SELECT
                     COUNT(*) as active_workflows,
                     COUNT(DISTINCT workflow_type) as workflow_types
                 FROM workflow_checkpoints
                 WHERE created_at > NOW() - INTERVAL '1 hour' * $1
-            """, hours)
+            """,
+                hours,
+            )
 
             # Get approval stats
-            approval_stats = await conn.fetchrow("""
+            approval_stats = await conn.fetchrow(
+                """
                 SELECT
                     COUNT(*) FILTER (WHERE status = 'pending') as pending,
                     COUNT(*) FILTER (WHERE status = 'approved') as approved,
@@ -595,19 +609,23 @@ async def workflow_metrics(
                     COUNT(*) FILTER (WHERE status = 'timeout') as timeout
                 FROM workflow_approval_requests
                 WHERE created_at > NOW() - INTERVAL '1 hour' * $1
-            """, hours)
+            """,
+                hours,
+            )
 
             return {
                 "period_hours": hours,
-                "active_workflows": checkpoint_stats['active_workflows'] if checkpoint_stats else 0,
-                "workflow_types_in_use": checkpoint_stats['workflow_types'] if checkpoint_stats else 0,
+                "active_workflows": checkpoint_stats["active_workflows"] if checkpoint_stats else 0,
+                "workflow_types_in_use": checkpoint_stats["workflow_types"]
+                if checkpoint_stats
+                else 0,
                 "approvals": {
-                    "pending": approval_stats['pending'] if approval_stats else 0,
-                    "approved": approval_stats['approved'] if approval_stats else 0,
-                    "rejected": approval_stats['rejected'] if approval_stats else 0,
-                    "timeout": approval_stats['timeout'] if approval_stats else 0
+                    "pending": approval_stats["pending"] if approval_stats else 0,
+                    "approved": approval_stats["approved"] if approval_stats else 0,
+                    "rejected": approval_stats["rejected"] if approval_stats else 0,
+                    "timeout": approval_stats["timeout"] if approval_stats else 0,
                 },
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
     except Exception as e:

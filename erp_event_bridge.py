@@ -21,7 +21,7 @@ from typing import Any, Optional
 from safe_task import create_safe_task
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -157,8 +157,7 @@ class ERPSystemEvent(BaseModel):
     origin: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class ERPEventResponse(BaseModel):
