@@ -53,5 +53,18 @@ async def get_state_history(limit: int = 100) -> list[dict[str, Any]]:
 
 
 @router.post("/chatgpt-agent-test")
-async def run_chatgpt_agent_test(full: bool = False) -> dict[str, Any]:
-    return await always_know_api.run_chatgpt_agent_test(full=full)
+async def run_chatgpt_agent_test(
+    full: bool = False,
+    skip_erp: bool = False,
+    blocking: bool = False,
+) -> dict[str, Any]:
+    return await always_know_api.run_chatgpt_agent_test(
+        full=full,
+        skip_erp=skip_erp,
+        blocking=blocking,
+    )
+
+
+@router.get("/chatgpt-agent-test/{run_id}")
+async def get_chatgpt_agent_test_result(run_id: str) -> dict[str, Any]:
+    return await always_know_api.get_chatgpt_agent_test_result(run_id)

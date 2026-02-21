@@ -6,19 +6,23 @@ API endpoints for the comprehensive observability brain.
 Provides instant access to system state without querying.
 """
 
-import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
-from safe_task import create_safe_task
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
+
+from safe_task import create_safe_task
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/always-know", tags=["Always-Know Observability"])
 
 # Lazy import
 _brain = None
+_full_test_runs: dict[str, dict[str, Any]] = {}
+_FULL_TEST_RETENTION = 20
 
 
 def get_brain():
@@ -30,6 +34,63 @@ def get_brain():
         except Exception as e:
             logger.error(f"Failed to get Always-Know Brain: {e}")
     return _brain
+
+
+def _prune_full_test_runs() -> None:
+    if len(_full_test_runs) <= _FULL_TEST_RETENTION:
+        return
+
+    # Keep newest N records (sorted by started_at descending).
+    ordered = sorted(
+        _full_test_runs.items(),
+        key=lambda item: item[1].get("started_at", ""),
+        reverse=True,
+    )
+    for run_id, _ in ordered[_FULL_TEST_RETENTION:]:
+        _full_test_runs.pop(run_id, None)
+
+
+async def _run_full_chatgpt_suite(run_id: str, skip_erp: bool) -> None:
+    from chatgpt_agent_tester import run_chatgpt_agent_tests
+
+    started = datetime.now(timezone.utc)
+    _full_test_runs[run_id] = {
+        "run_id": run_id,
+        "status": "running",
+        "mode": "full",
+        "skip_erp": bool(skip_erp),
+        "started_at": started.isoformat(),
+    }
+    _prune_full_test_runs()
+
+    try:
+        result = await run_chatgpt_agent_tests(skip_erp=skip_erp)
+        finished = datetime.now(timezone.utc)
+        _full_test_runs[run_id] = {
+            "run_id": run_id,
+            "status": "completed",
+            "mode": "full",
+            "skip_erp": bool(skip_erp),
+            "started_at": started.isoformat(),
+            "completed_at": finished.isoformat(),
+            "duration_seconds": (finished - started).total_seconds(),
+            "result": result,
+        }
+    except Exception as exc:
+        finished = datetime.now(timezone.utc)
+        _full_test_runs[run_id] = {
+            "run_id": run_id,
+            "status": "failed",
+            "mode": "full",
+            "skip_erp": bool(skip_erp),
+            "started_at": started.isoformat(),
+            "completed_at": finished.isoformat(),
+            "duration_seconds": (finished - started).total_seconds(),
+            "error": str(exc),
+        }
+        logger.exception("Always-Know full ChatGPT agent test failed (run_id=%s)", run_id)
+    finally:
+        _prune_full_test_runs()
 
 
 @router.get("/state")
@@ -128,7 +189,6 @@ async def trigger_ui_tests() -> dict[str, Any]:
         raise HTTPException(status_code=503, detail="Always-Know Brain not available")
 
     try:
-        import asyncio
         create_safe_task(brain._run_ui_tests())
         return {
             "status": "triggered",
@@ -218,7 +278,11 @@ async def get_state_history(limit: int = 100) -> list[dict[str, Any]]:
 
 
 @router.post("/chatgpt-agent-test")
-async def run_chatgpt_agent_test(full: bool = False, skip_erp: bool = False) -> dict[str, Any]:
+async def run_chatgpt_agent_test(
+    full: bool = False,
+    skip_erp: bool = False,
+    blocking: bool = False,
+) -> dict[str, Any]:
     """
     Run ChatGPT-Agent-Level UI tests.
     These are real human-like tests that login, navigate, fill forms, etc.
@@ -230,11 +294,34 @@ async def run_chatgpt_agent_test(full: bool = False, skip_erp: bool = False) -> 
     try:
         from chatgpt_agent_tester import run_chatgpt_agent_tests, run_quick_health_test
 
+        if full and not blocking:
+            run_id = uuid4().hex[:12]
+            create_safe_task(_run_full_chatgpt_suite(run_id, skip_erp=skip_erp))
+            quick_snapshot = await run_quick_health_test(skip_erp=skip_erp)
+            return {
+                "status": "accepted",
+                "mode": "full",
+                "blocking": False,
+                "run_id": run_id,
+                "skip_erp": bool(skip_erp),
+                "message": "Full ChatGPT agent suite started in background",
+                "result_url": f"/api/v1/always-know/chatgpt-agent-test/{run_id}",
+                "quick_snapshot": quick_snapshot,
+            }
+
         if full:
             return await run_chatgpt_agent_tests(skip_erp=skip_erp)
-        else:
-            return await run_quick_health_test(skip_erp=skip_erp)
+
+        return await run_quick_health_test(skip_erp=skip_erp)
     except ImportError:
         raise HTTPException(status_code=503, detail="ChatGPT Agent Tester not available (Playwright not installed)") from None
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/chatgpt-agent-test/{run_id}")
+async def get_chatgpt_agent_test_result(run_id: str) -> dict[str, Any]:
+    run = _full_test_runs.get(run_id)
+    if not run:
+        raise HTTPException(status_code=404, detail=f"No run found for id {run_id}")
+    return run
