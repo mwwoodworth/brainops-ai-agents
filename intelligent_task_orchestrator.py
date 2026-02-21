@@ -901,14 +901,24 @@ class IntelligentTaskOrchestrator:
                     return
                 cur = conn.cursor()
 
-                cur.execute(
-                    """
-                UPDATE ai_autonomous_tasks
-                SET status = %s, updated_at = NOW()
-                WHERE id = %s::uuid
-                """,
-                    (status, task_id),
-                )
+                if status in ("completed", "failed", "cancelled"):
+                    cur.execute(
+                        """
+                    UPDATE ai_autonomous_tasks
+                    SET status = %s, updated_at = NOW(), completed_at = NOW()
+                    WHERE id = %s::uuid
+                    """,
+                        (status, task_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                    UPDATE ai_autonomous_tasks
+                    SET status = %s, updated_at = NOW()
+                    WHERE id = %s::uuid
+                    """,
+                        (status, task_id),
+                    )
 
                 conn.commit()
                 cur.close()
