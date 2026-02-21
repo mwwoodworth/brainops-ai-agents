@@ -195,8 +195,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.34.2"
-        )  # E2E verifier auth-tolerant ERP health handling + BrainStack branding alignment in UI flow checks
+            "VERSION", "v11.36.0"
+        )  # Wave 2C/2D: all inline routes extracted from app.py (0 remaining)
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))
