@@ -26,6 +26,7 @@ Checks (14 total):
   12. correlation_missing    — Recent agent executions have correlation_id
   13. financial_double_count — No duplicate revenue tracking rows
   14. synthetic_canary       — Write/read pipeline liveness
+  15. awareness_staleness    — system_awareness_state heartbeats are fresh
 """
 
 import asyncio
@@ -108,8 +109,14 @@ class InvariantEngine:
                     "violation_detected",
                     json.dumps({"check": check_name, "severity": severity, "message": message}),
                 )
-            except Exception:
-                pass
+            except Exception as fallback_exc:
+                logger.critical(
+                    "INVARIANT_DOUBLE_FAIL: check=%s sev=%s msg=%s err=%s",
+                    check_name,
+                    severity,
+                    message,
+                    fallback_exc,
+                )
             return None
 
     async def _send_slack_alert(
@@ -622,6 +629,33 @@ class InvariantEngine:
             )
             return False
 
+    async def _check_awareness_staleness(self, pool, violations: list) -> None:
+        """Check 15: system_awareness_state heartbeats are fresh (< 10 min)."""
+        try:
+            stale = await pool.fetch(
+                """
+                SELECT component_id, last_heartbeat
+                FROM system_awareness_state
+                WHERE last_heartbeat < NOW() - INTERVAL '10 minutes'
+            """
+            )
+            for row in stale:
+                await self._record(
+                    violations,
+                    "awareness_staleness",
+                    "high",
+                    f"Component {row['component_id']} heartbeat stale since {row['last_heartbeat']}",
+                    {
+                        "component_id": row["component_id"],
+                        "last_heartbeat": str(row["last_heartbeat"]),
+                    },
+                )
+        except Exception as exc:
+            # Table may not exist yet — non-fatal
+            if "does not exist" in str(exc).lower():
+                return
+            logger.warning("awareness_staleness check failed: %s", exc)
+
     # ════════════════════════════════════════════════════════════════════
     #  MAIN RUN METHOD
     # ════════════════════════════════════════════════════════════════════
@@ -729,6 +763,7 @@ class InvariantEngine:
             self._check_role_drift,
             self._check_correlation_missing,
             self._check_financial_double_count,
+            self._check_awareness_staleness,
         ]
 
         for check_fn in checks:
