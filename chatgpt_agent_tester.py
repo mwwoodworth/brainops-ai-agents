@@ -519,7 +519,7 @@ class ChatGPTAgentTester:
             FlowStep("Navigate to Brainstack Studio", "navigate", value="https://brainstack-studio.vercel.app"),
             FlowStep("Wait for load", "wait", value="2000"),
             FlowStep("Screenshot Brainstack Studio", "screenshot"),
-            FlowStep("Assert BrainOps branding", "assert_text", expected="BrainOps"),
+            FlowStep("Assert BrainStack branding", "assert_text", expected="BrainStack Studio"),
         ]
         return await self.run_flow("Brainstack Studio Homepage", steps)
 
