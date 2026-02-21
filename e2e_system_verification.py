@@ -1014,9 +1014,9 @@ class E2ESystemVerification:
                         error_message=f"Missing required fields: {missing_fields}",
                     )
 
-                # Check for app-level error payloads, but only on tests expecting success.
-                # Negative auth tests intentionally return {error: "..."} with 401/403.
-                if isinstance(response_body, dict) and 200 <= test.expected_status < 300:
+                # Check for app-level error payloads only on successful HTTP responses.
+                # Some tests intentionally allow auth responses (e.g., 401) as healthy.
+                if isinstance(response_body, dict) and 200 <= response.status < 300:
                     if response_body.get("status") == "error":
                         return TestResult(
                             test_name=test.name,

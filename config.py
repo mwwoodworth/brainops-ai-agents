@@ -195,8 +195,8 @@ class AppConfig:
     def __init__(self):
         # Version is used by health endpoints + deploy.sh verification.
         self.version = os.getenv(
-            "VERSION", "v11.34.0"
-        )  # E2E verifier hardening + always-know async full test execution stability
+            "VERSION", "v11.34.1"
+        )  # E2E verifier auth-tolerant ERP health handling + always-know async full test stability
         self.service_name = "BrainOps AI OS"
         self.host = os.getenv("HOST", "0.0.0.0")
         self.port = int(os.getenv("PORT", "10000"))

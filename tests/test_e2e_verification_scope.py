@@ -1,3 +1,5 @@
+import asyncio
+
 import e2e_system_verification as mod
 
 
@@ -38,3 +40,35 @@ def test_apply_api_key_override_does_not_override_mcp_key(monkeypatch):
     assert out[1].headers["X-API-Key"] == "mcpkey"
     assert out[2].headers == {}
 
+
+def test_run_single_test_allows_acceptable_401_without_error_payload_failure():
+    class _FakeResponse:
+        status = 401
+        content_type = "application/json"
+
+        async def json(self):
+            return {"status": "unauthorized", "error": "Unauthorized"}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeSession:
+        def request(self, **_kwargs):
+            return _FakeResponse()
+
+    verifier = mod.E2ESystemVerification()
+    test = mod.EndpointTest(
+        name="ERP - API Health",
+        url=f"{mod.ERP_URL}/api/health",
+        expected_status=200,
+        acceptable_statuses=[401],
+        expected_fields=[],
+        validation_func="validate_erp_api_health",
+    )
+
+    result = asyncio.run(verifier._run_single_test(test, _FakeSession()))
+    assert result.status == mod.VerificationStatus.PASSED
+    assert result.status_code == 401
