@@ -19,8 +19,11 @@ import api.revenue as revenue_api  # noqa: E402
 import api.revenue_automation as revenue_automation_api  # noqa: E402
 import api.taskmate as taskmate_api  # noqa: E402
 import database.async_connection as db_async  # noqa: E402
+import api.agents as agents_api  # noqa: E402
 import api.health as health_api  # noqa: E402
+import api.scheduler as scheduler_api  # noqa: E402
 import services.db_health as db_health_svc  # noqa: E402
+import services.scheduler_queries as scheduler_queries_svc  # noqa: E402
 
 
 def pytest_addoption(parser):
@@ -293,5 +296,8 @@ def patch_pool(monkeypatch, mock_tenant_pool):
     monkeypatch.setattr(revenue_api, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(db_async, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(health_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(agents_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(scheduler_api, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(db_health_svc, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(scheduler_queries_svc, "get_pool", lambda: mock_tenant_pool)
     return mock_tenant_pool
