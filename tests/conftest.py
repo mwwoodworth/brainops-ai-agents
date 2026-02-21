@@ -20,6 +20,10 @@ import api.revenue_automation as revenue_automation_api  # noqa: E402
 import api.taskmate as taskmate_api  # noqa: E402
 import database.async_connection as db_async  # noqa: E402
 import api.agents as agents_api  # noqa: E402
+import api.ai_operations as ai_operations_api  # noqa: E402
+import api.operational as operational_api  # noqa: E402
+import api.platform as platform_api  # noqa: E402
+import api.content_revenue as content_revenue_api  # noqa: E402
 import api.health as health_api  # noqa: E402
 import api.scheduler as scheduler_api  # noqa: E402
 import services.db_health as db_health_svc  # noqa: E402
@@ -300,4 +304,8 @@ def patch_pool(monkeypatch, mock_tenant_pool):
     monkeypatch.setattr(scheduler_api, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(db_health_svc, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(scheduler_queries_svc, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(ai_operations_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(operational_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(platform_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(content_revenue_api, "get_pool", lambda: mock_tenant_pool)
     return mock_tenant_pool

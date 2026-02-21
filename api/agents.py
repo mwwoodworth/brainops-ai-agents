@@ -147,9 +147,9 @@ def _safe_json_dumps(obj, **kwargs):
 
 
 def _resolve_tenant(request):
-    import app as _app
+    from services.tenant_helpers import resolve_tenant_uuid_from_request
 
-    return _app._resolve_tenant_uuid_from_request(request)
+    return resolve_tenant_uuid_from_request(request)
 
 
 def _product_agent_available():
