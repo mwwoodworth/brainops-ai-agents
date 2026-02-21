@@ -11,9 +11,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from config import config
 from database.async_connection import DatabaseUnavailableError, get_pool, using_fallback
 from utils.embedding_provider import generate_embedding_async
 
@@ -972,3 +973,202 @@ def _row_to_memory_entry(row) -> dict:
         "similarity": float(row["similarity"]) if row["similarity"] else None,
         "metadata": row["metadata"] or {},
     }
+
+
+# =============================================================================
+# WAVE 2A: Routes extracted from app.py inline handlers
+# =============================================================================
+
+
+@router.get("/unified-search")
+async def unified_search(
+    request: Request,
+    query: str = Query(..., description="Search query across all memory tiers"),
+    limit: int = Query(20, description="Max results"),
+    tenant_id: str = Query(None, description="Optional tenant filter"),
+):
+    """
+    Unified cross-table search across memory, documents, and episodic memory.
+    Returns ranked results using RRF hybrid search.
+    """
+    import app as _app
+
+    if (
+        not getattr(_app, "MEMORY_AVAILABLE", False)
+        or not hasattr(request.app.state, "memory")
+        or not request.app.state.memory
+    ):
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "results": [],
+            "sources": [],
+            "message": "Memory system not available (database initializing or unavailable)",
+        }
+
+    try:
+        memory_manager = request.app.state.memory
+        results = memory_manager.unified_retrieval(
+            query=query,
+            limit=limit,
+            tenant_id=tenant_id,
+        )
+        return {
+            "success": True,
+            "query": query,
+            "count": len(results),
+            "results": results,
+            "sources": list({r.get("type") for r in results}),
+        }
+    except Exception as e:
+        logger.error(f"Unified search failed: {e}")
+        return {
+            "success": False,
+            "status": "degraded",
+            "query": query,
+            "count": 0,
+            "results": [],
+            "sources": [],
+            "message": f"Unified search degraded: {type(e).__name__}",
+        }
+
+
+@router.post("/backfill-embeddings")
+async def backfill_embeddings(
+    request: Request,
+    batch_size: int = Query(100, description="Batch size per run"),
+):
+    """
+    Backfill missing embeddings in unified_ai_memory using the fallback chain.
+    Uses local sentence-transformers when cloud APIs unavailable.
+    """
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+
+        db_config = {
+            "host": config.database.host,
+            "port": config.database.port,
+            "database": config.database.database,
+            "user": config.database.user,
+            "password": config.database.password,
+        }
+
+        conn = psycopg2.connect(**db_config)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute(
+            """
+        SELECT id, content, memory_type
+        FROM unified_ai_memory
+        WHERE embedding IS NULL
+        LIMIT %s
+        """,
+            (batch_size,),
+        )
+
+        memories = cur.fetchall()
+        if not memories:
+            cur.close()
+            conn.close()
+            return {
+                "success": True,
+                "message": "No memories need embedding backfill",
+                "processed": 0,
+            }
+
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            embedding_model = "local:all-MiniLM-L6-v2"
+        except ImportError:
+            cur.close()
+            conn.close()
+            raise HTTPException(
+                status_code=503, detail="sentence-transformers not available for backfill"
+            ) from None
+
+        processed = 0
+        for mem in memories:
+            try:
+                content_str = (
+                    json.dumps(mem["content"])
+                    if isinstance(mem["content"], dict)
+                    else str(mem["content"])
+                )
+                embedding = embedder.encode(content_str).tolist()
+
+                cur.execute(
+                    """
+                UPDATE unified_ai_memory
+                SET embedding = %s
+                WHERE id = %s
+                """,
+                    (embedding, mem["id"]),
+                )
+                processed += 1
+            except Exception as e:
+                logger.warning(f"Failed to embed memory {mem['id']}: {e}")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        conn2 = psycopg2.connect(**db_config)
+        cur2 = conn2.cursor()
+        cur2.execute("SELECT COUNT(*) FROM unified_ai_memory WHERE embedding IS NULL")
+        remaining = cur2.fetchone()[0]
+        cur2.close()
+        conn2.close()
+
+        return {
+            "success": True,
+            "processed": processed,
+            "remaining": remaining,
+            "model_used": embedding_model,
+            "message": f"Backfilled {processed} embeddings, {remaining} remaining",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Embedding backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/force-sync")
+async def force_sync_embedded_memory(request: Request):
+    """
+    Force sync embedded memory system from master Postgres.
+    Useful when local SQLite cache is empty or out of sync.
+    """
+    embedded_memory = getattr(request.app.state, "embedded_memory", None)
+
+    if not embedded_memory:
+        raise HTTPException(status_code=503, detail="Embedded memory system not available")
+
+    try:
+        cursor = embedded_memory.sqlite_conn.cursor()
+        before_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        await embedded_memory.sync_from_master(force=True)
+
+        after_count = cursor.execute("SELECT COUNT(*) FROM unified_ai_memory").fetchone()[0]
+
+        return {
+            "success": True,
+            "before_count": before_count,
+            "after_count": after_count,
+            "synced_count": after_count - before_count,
+            "last_sync": embedded_memory.last_sync.isoformat()
+            if embedded_memory.last_sync
+            else None,
+            "pool_connected": embedded_memory.pg_pool is not None,
+        }
+
+    except Exception as e:
+        logger.error(f"Force sync failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -19,6 +19,8 @@ import api.revenue as revenue_api  # noqa: E402
 import api.revenue_automation as revenue_automation_api  # noqa: E402
 import api.taskmate as taskmate_api  # noqa: E402
 import database.async_connection as db_async  # noqa: E402
+import api.health as health_api  # noqa: E402
+import services.db_health as db_health_svc  # noqa: E402
 
 
 def pytest_addoption(parser):
@@ -177,7 +179,11 @@ def configure_test_security(api_key):
     original_auth_configured = ai_app.config.security.auth_configured
     original_app_keys = set(ai_app.config.security.valid_api_keys)
 
-    module_sets = [brain_api.VALID_API_KEYS, revenue_api.VALID_API_KEYS, revenue_automation_api.VALID_API_KEYS]
+    module_sets = [
+        brain_api.VALID_API_KEYS,
+        revenue_api.VALID_API_KEYS,
+        revenue_automation_api.VALID_API_KEYS,
+    ]
     original_module_keys = [set(s) for s in module_sets]
 
     ai_app.config.security.valid_api_keys.clear()
@@ -286,4 +292,6 @@ def patch_pool(monkeypatch, mock_tenant_pool):
     monkeypatch.setattr(taskmate_api, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(revenue_api, "get_pool", lambda: mock_tenant_pool)
     monkeypatch.setattr(db_async, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(health_api, "get_pool", lambda: mock_tenant_pool)
+    monkeypatch.setattr(db_health_svc, "get_pool", lambda: mock_tenant_pool)
     return mock_tenant_pool

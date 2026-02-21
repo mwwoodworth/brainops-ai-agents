@@ -2,12 +2,13 @@
 Unified Brain API Endpoints
 Single source of truth for ALL BrainOps memory
 """
+import json
 import logging
 import os
 import re
-import json
-from datetime import datetime
 import time
+import uuid
+from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Security
@@ -455,11 +456,7 @@ async def recall_memory(query: RecallQuery):
                     metadata = {}
             if not isinstance(metadata, dict):
                 metadata = {}
-            category = (
-                metadata.get("memory_category")
-                or metadata.get("category")
-                or "operational"
-            )
+            category = metadata.get("memory_category") or metadata.get("category") or "operational"
             category = str(category)
             category_counts[category] = category_counts.get(category, 0) + 1
             entry["memory_category"] = category
@@ -727,4 +724,148 @@ async def get_operational_truth():
         }
     except Exception as e:
         logger.error(f"Failed to get operational truth: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# =============================================================================
+# WAVE 2A: Routes extracted from app.py inline handlers
+# =============================================================================
+
+
+@router.get("/decide")
+async def brain_decide(
+    context: str = Query(..., description="Decision context or question"),
+    decision_type: str = Query(
+        "operational", description="Type: strategic, operational, tactical, emergency"
+    ),
+):
+    """
+    AI decision endpoint - uses the brain to make autonomous decisions.
+    Returns a structured decision with confidence and recommended actions.
+    """
+    from database.async_connection import get_pool
+
+    pool = get_pool()
+    decision_id = str(uuid.uuid4())
+
+    try:
+        similar_decisions = await pool.fetch(
+            """
+            SELECT decision_type, context, execution_result as result, confidence, created_at
+            FROM aurea_decisions
+            WHERE decision_type = $1
+            ORDER BY created_at DESC LIMIT 5
+        """,
+            decision_type,
+        )
+
+        decision_result = {
+            "decision_id": decision_id,
+            "decision_type": decision_type,
+            "context": context,
+            "analysis": f"Analyzed context for {decision_type} decision",
+            "recommendation": "proceed" if "urgent" not in context.lower() else "review",
+            "confidence": 0.85,
+            "reasoning": [
+                f"Context analyzed: {context[:100]}...",
+                f"Decision type: {decision_type}",
+                f"Similar past decisions reviewed: {len(similar_decisions)}",
+            ],
+            "actions": [
+                {"action": "evaluate", "priority": "high"},
+                {"action": "monitor", "priority": "medium"},
+            ],
+            "historical_context": [
+                {
+                    "type": d["decision_type"],
+                    "result": d["result"],
+                    "confidence": float(d["confidence"]) if d.get("confidence") else 0.5,
+                }
+                for d in similar_decisions[:3]
+            ]
+            if similar_decisions
+            else [],
+        }
+
+        await pool.execute(
+            """
+            INSERT INTO aurea_decisions (id, decision_type, description, context, execution_result, confidence, status, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, 'completed', NOW())
+        """,
+            decision_id,
+            decision_type,
+            f"Decision for: {context[:100]}",
+            json.dumps({"query": context}),
+            json.dumps(decision_result),
+            0.85,
+        )
+
+        return decision_result
+
+    except Exception as e:
+        logger.error(f"Brain decision failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/learn")
+async def brain_learn(
+    insight: str = Body(..., embed=True),
+    source: str = Body("manual", embed=True),
+    category: str = Body("general", embed=True),
+    importance: float = Body(0.5, embed=True),
+):
+    """
+    Store learning insights in the AI brain.
+    Used for continuous learning and improvement of AI capabilities.
+    """
+    import app as _app
+    from database.async_connection import get_pool
+
+    pool = get_pool()
+    insight_id = str(uuid.uuid4())
+
+    try:
+        await pool.execute(
+            """
+            INSERT INTO ai_learning_insights (id, insight, insight_type, category, impact_score, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
+            ON CONFLICT DO NOTHING
+        """,
+            insight_id,
+            insight,
+            source,
+            category,
+            importance,
+        )
+
+        thought_id = str(uuid.uuid4())
+        await pool.execute(
+            """
+            INSERT INTO ai_thought_stream (id, thought_id, thought_type, thought_content, metadata, timestamp)
+            VALUES (gen_random_uuid(), $1, 'learning', $2, $3, NOW())
+            ON CONFLICT DO NOTHING
+        """,
+            thought_id,
+            insight,
+            json.dumps({"source": source, "category": category}),
+        )
+
+        learning_active = (
+            getattr(_app, "LEARNING_AVAILABLE", False)
+            and getattr(_app.app.state, "learning", None) is not None
+        )
+
+        return {
+            "success": True,
+            "insight_id": insight_id,
+            "thought_id": thought_id,
+            "message": "Insight stored in brain",
+            "category": category,
+            "importance": importance,
+            "learning_system_active": learning_active,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Brain learning failed: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
