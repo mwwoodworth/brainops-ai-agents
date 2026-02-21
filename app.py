@@ -3085,8 +3085,18 @@ async def root(request: Request):
     }
 
 
-from src.graph.product_agent import app as product_agent_graph
-from langchain_core.messages import HumanMessage
+# LangGraph Product Agent - optional import with graceful degradation
+try:
+    from src.graph.product_agent import app as product_agent_graph
+    from langchain_core.messages import HumanMessage
+
+    PRODUCT_AGENT_AVAILABLE = True
+    logger.info("Product Agent loaded - LangGraph product generation enabled")
+except (ImportError, Exception) as e:
+    PRODUCT_AGENT_AVAILABLE = False
+    product_agent_graph = None
+    HumanMessage = None
+    logger.warning(f"Product Agent not available: {e}")
 
 
 class ProductRequest(BaseModel):
@@ -3098,6 +3108,11 @@ async def run_product_agent(request: ProductRequest):
     """
     Run the LangGraph Product Agent to generate product specs, code, and QA.
     """
+    if not PRODUCT_AGENT_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Product Agent is not available - required dependencies not installed"
+        )
     try:
         # Invoke the graph
         result = product_agent_graph.invoke({"messages": [HumanMessage(content=request.concept)]})

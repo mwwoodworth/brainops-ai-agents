@@ -30,14 +30,24 @@ TEST_EMAIL_DOMAINS = ("test.com", "example.com", "localhost", "demo@roofing.com"
 # Personal email providers - blocked by default to prevent accidental spam
 # Only business domains should be contacted in automated outreach
 BLOCKED_PERSONAL_PROVIDERS = (
-    "@gmail.com", "@yahoo.com", "@outlook.com", "@hotmail.com",
-    "@aol.com", "@icloud.com", "@protonmail.com", "@mail.com",
-    "@live.com", "@msn.com", "@ymail.com", "@rocketmail.com"
+    "@gmail.com",
+    "@yahoo.com",
+    "@outlook.com",
+    "@hotmail.com",
+    "@aol.com",
+    "@icloud.com",
+    "@protonmail.com",
+    "@mail.com",
+    "@live.com",
+    "@msn.com",
+    "@ymail.com",
+    "@rocketmail.com",
 )
 
 # Environment flag to explicitly allow personal emails (must be set intentionally)
-import os
-ALLOW_PERSONAL_EMAIL_OUTREACH = os.getenv("ALLOW_PERSONAL_EMAIL_OUTREACH", "false").lower() == "true"
+ALLOW_PERSONAL_EMAIL_OUTREACH = (
+    os.getenv("ALLOW_PERSONAL_EMAIL_OUTREACH", "false").lower() == "true"
+)
 
 
 def _is_test_email(email: str | None) -> bool:
@@ -64,6 +74,7 @@ def _is_test_email(email: str | None) -> bool:
         if any(provider in lowered for provider in BLOCKED_PERSONAL_PROVIDERS):
             return True
     return False
+
 
 AI_CORE_AVAILABLE = False
 ai_generate = None
@@ -259,20 +270,23 @@ def _coerce_value_estimate(raw_value: Any) -> float | None:
     # For range-like strings (e.g., 900K-2.9M), use upper bound.
     return max(values)
 
+
 # Database configuration - use config module for consistency
 # NO hardcoded credentials - all values MUST come from environment variables
 try:
     from config import config
+
     DB_CONFIG = {
         "host": config.database.host,
         "database": config.database.database,
         "user": config.database.user,
         "password": config.database.password,
-        "port": config.database.port
+        "port": config.database.port,
     }
 except (ImportError, AttributeError):
     # Fallback to environment variables directly - supports DATABASE_URL
     from urllib.parse import urlparse
+
     _DB_HOST = os.getenv("DB_HOST")
     _DB_NAME = os.getenv("DB_NAME")
     _DB_USER = os.getenv("DB_USER")
@@ -281,14 +295,14 @@ except (ImportError, AttributeError):
 
     # Fallback to DATABASE_URL if individual vars not set
     if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
-        _DATABASE_URL = os.getenv('DATABASE_URL', '')
+        _DATABASE_URL = os.getenv("DATABASE_URL", "")
         if _DATABASE_URL:
             _parsed = urlparse(_DATABASE_URL)
-            _DB_HOST = _parsed.hostname or ''
-            _DB_NAME = _parsed.path.lstrip('/') if _parsed.path else ''
-            _DB_USER = _parsed.username or ''
-            _DB_PASSWORD = _parsed.password or ''
-            _DB_PORT = str(_parsed.port) if _parsed.port else '5432'
+            _DB_HOST = _parsed.hostname or ""
+            _DB_NAME = _parsed.path.lstrip("/") if _parsed.path else ""
+            _DB_USER = _parsed.username or ""
+            _DB_PASSWORD = _parsed.password or ""
+            _DB_PORT = str(_parsed.port) if _parsed.port else "5432"
 
     if not all([_DB_HOST, _DB_NAME, _DB_USER, _DB_PASSWORD]):
         raise RuntimeError(
@@ -301,12 +315,13 @@ except (ImportError, AttributeError):
         "database": _DB_NAME,
         "user": _DB_USER,
         "password": _DB_PASSWORD,
-        "port": int(_DB_PORT)
+        "port": int(_DB_PORT),
     }
 
 # Connection pool for sync operations (reuse connections)
 _sync_connection_pool = []
 _MAX_POOL_SIZE = 5
+
 
 def get_sync_connection():
     """Get a connection from pool or create new one"""
@@ -324,6 +339,7 @@ def get_sync_connection():
             except Exception:
                 logger.debug("Connection already closed while clearing pool")
     return psycopg2.connect(**DB_CONFIG, connect_timeout=10)
+
 
 def return_sync_connection(conn):
     """Return connection to pool for reuse"""
@@ -344,8 +360,10 @@ def return_sync_connection(conn):
         except Exception as e:
             logger.debug(f"Error closing excess connection: {e}")
 
+
 class LeadStage(Enum):
     """Lead progression stages"""
+
     NEW = "new"
     CONTACTED = "contacted"
     QUALIFIED = "qualified"
@@ -354,8 +372,10 @@ class LeadStage(Enum):
     WON = "won"
     LOST = "lost"
 
+
 class RevenueAction(Enum):
     """Revenue generation actions"""
+
     IDENTIFY_LEAD = "identify_lead"
     QUALIFY_LEAD = "qualify_lead"
     SEND_OUTREACH = "send_outreach"
@@ -365,9 +385,11 @@ class RevenueAction(Enum):
     CLOSE_DEAL = "close_deal"
     NURTURE_LEAD = "nurture_lead"
 
+
 @dataclass
 class Lead:
     """Represents a potential customer"""
+
     id: str
     company_name: str
     contact_name: str
@@ -382,9 +404,11 @@ class Lead:
     next_action: Optional[RevenueAction]
     next_action_date: Optional[datetime]
 
+
 @dataclass
 class RevenueOpportunity:
     """Represents a revenue opportunity"""
+
     id: str
     lead_id: str
     title: str
@@ -394,6 +418,7 @@ class RevenueOpportunity:
     stage: str
     notes: str
     created_at: datetime
+
 
 class AutonomousRevenueSystem:
     """Fully autonomous revenue generation system"""
@@ -413,11 +438,17 @@ class AutonomousRevenueSystem:
         not at runtime. This method now verifies existence only.
         """
         required_tables = [
-            'revenue_leads', 'revenue_opportunities', 'revenue_actions',
-            'email_templates', 'revenue_metrics', 'ai_email_sequences',
-            'ai_competitor_analysis', 'ai_churn_predictions',
-            'ai_upsell_recommendations', 'ai_revenue_forecasts',
-            'unified_brain_logs',
+            "revenue_leads",
+            "revenue_opportunities",
+            "revenue_actions",
+            "email_templates",
+            "revenue_metrics",
+            "ai_email_sequences",
+            "ai_competitor_analysis",
+            "ai_churn_predictions",
+            "ai_upsell_recommendations",
+            "ai_revenue_forecasts",
+            "unified_brain_logs",
         ]
         conn = psycopg2.connect(**DB_CONFIG)
         cursor = conn.cursor()
@@ -542,13 +573,14 @@ class AutonomousRevenueSystem:
                     max_tokens=1500,
                 )
             )
-            score = qualification.get('score', 0) / 100.0
+            score = qualification.get("score", 0) / 100.0
 
             # Update lead with qualification
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE revenue_leads
                 SET score = %s,
                     stage = %s,
@@ -556,13 +588,15 @@ class AutonomousRevenueSystem:
                     metadata = metadata || %s,
                     updated_at = NOW()
                 WHERE id = %s
-            """, (
-                score,
-                'qualified' if score > 0.6 else 'contacted',
-                qualification.get('estimated_value', 0),
-                json.dumps({'qualification': qualification}),
-                lead_id
-            ))
+            """,
+                (
+                    score,
+                    "qualified" if score > 0.6 else "contacted",
+                    qualification.get("estimated_value", 0),
+                    json.dumps({"qualification": qualification}),
+                    lead_id,
+                ),
+            )
 
             conn.commit()
             cursor.close()
@@ -572,21 +606,21 @@ class AutonomousRevenueSystem:
 
             # Log to unified brain
             await self._log_to_unified_brain(
-                action='lead_qualification',
+                action="lead_qualification",
                 lead_id=lead_id,
                 score=score,
-                qualification=qualification
+                qualification=qualification,
             )
 
-            logger.info(f"Qualified lead {lead_id} with score {score} (LTV: ${qualification.get('lifetime_value', 0)}, Churn Risk: {qualification.get('churn_risk', 0):.1%})")
+            logger.info(
+                f"Qualified lead {lead_id} with score {score} (LTV: ${qualification.get('lifetime_value', 0)}, Churn Risk: {qualification.get('churn_risk', 0):.1%})"
+            )
             return score, qualification
 
         except Exception as e:
             logger.error(f"Failed to qualify lead: {e}")
             await self._log_to_unified_brain(
-                action='lead_qualification_error',
-                lead_id=lead_id,
-                error=str(e)
+                action="lead_qualification_error", lead_id=lead_id, error=str(e)
             )
             return 0.0, {}
 
@@ -621,16 +655,16 @@ class AutonomousRevenueSystem:
             )
 
             # Parse and structure email
-            lines = email_content.split('\n')
-            subject = lines[0].replace('Subject:', '').strip()
-            body = '\n'.join(lines[2:]).strip()
+            lines = email_content.split("\n")
+            subject = lines[0].replace("Subject:", "").strip()
+            body = "\n".join(lines[2:]).strip()
 
             outreach = {
-                'to': recipient,
-                'subject': subject,
-                'body': body,
-                'lead_id': lead_id,
-                'scheduled_send': datetime.now(timezone.utc) + timedelta(hours=1)
+                "to": recipient,
+                "subject": subject,
+                "body": body,
+                "lead_id": lead_id,
+                "scheduled_send": datetime.now(timezone.utc) + timedelta(hours=1),
             }
 
             # Store outreach
@@ -681,15 +715,15 @@ class AutonomousRevenueSystem:
             pricing = await self._calculate_dynamic_pricing(requirements)
 
             proposal = {
-                'lead_id': lead_id,
-                'content': proposal_content,
-                'pricing': pricing,
-                'valid_until': datetime.now(timezone.utc) + timedelta(days=30),
-                'created_at': datetime.now(timezone.utc).isoformat()
+                "lead_id": lead_id,
+                "content": proposal_content,
+                "pricing": pricing,
+                "valid_until": datetime.now(timezone.utc) + timedelta(days=30),
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
 
             # Create opportunity
-            await self._create_opportunity(lead_id, pricing.get('total', 0))
+            await self._create_opportunity(lead_id, pricing.get("total", 0))
 
             # Update lead stage
             await self._update_lead_stage(lead_id, LeadStage.PROPOSAL_SENT)
@@ -729,10 +763,7 @@ class AutonomousRevenueSystem:
             )
 
             # Generate negotiation response
-            negotiation_response = await self._generate_negotiation_response(
-                lead_id,
-                analysis
-            )
+            negotiation_response = await self._generate_negotiation_response(lead_id, analysis)
 
             # Update opportunity
             await self._update_opportunity_stage(lead_id, "negotiating")
@@ -755,25 +786,31 @@ class AutonomousRevenueSystem:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE revenue_opportunities
                 SET stage = 'closed_won',
                     won = true,
                     closed_at = NOW(),
                     value = %s
                 WHERE lead_id = %s
-            """, (terms.get('final_value', 0), lead_id))
+            """,
+                (terms.get("final_value", 0), lead_id),
+            )
 
             # Update lead stage
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE revenue_leads
                 SET stage = 'won',
                     updated_at = NOW()
                 WHERE id = %s
-            """, (lead_id,))
+            """,
+                (lead_id,),
+            )
 
             # Commit core state changes first; metrics updates are best-effort and schema varies.
-            final_value = terms.get('final_value', 0)
+            final_value = terms.get("final_value", 0)
             conn.commit()
 
             try:
@@ -821,9 +858,9 @@ class AutonomousRevenueSystem:
             task = task or {}
             workflow_id = str(uuid.uuid4())
             self.active_workflows[workflow_id] = {
-                'lead_id': lead_id,
-                'start_time': datetime.now(timezone.utc),
-                'status': 'running'
+                "lead_id": lead_id,
+                "start_time": datetime.now(timezone.utc),
+                "status": "running",
             }
 
             # 1. Qualify the lead
@@ -841,9 +878,7 @@ class AutonomousRevenueSystem:
             response_timeout = task.get("response_timeout_seconds", 3600)
             response_poll = task.get("response_poll_seconds", 60)
             responded = await self._await_lead_response(
-                lead_id,
-                timeout_seconds=response_timeout,
-                poll_interval=response_poll
+                lead_id, timeout_seconds=response_timeout, poll_interval=response_poll
             )
             if not responded:
                 await self._schedule_nurture_campaign(lead_id)
@@ -851,7 +886,7 @@ class AutonomousRevenueSystem:
 
             # 4. Generate proposal if qualified
             if score > 0.6:
-                requirements = qualification.get('requirements', {})
+                requirements = qualification.get("requirements", {})
                 await self.generate_proposal(lead_id, requirements)
 
                 # 5. Handle negotiation (if needed)
@@ -860,14 +895,14 @@ class AutonomousRevenueSystem:
                 # 6. Close deal
                 # This would be triggered by acceptance
 
-            self.active_workflows[workflow_id]['status'] = 'completed'
-            self.active_workflows[workflow_id]['end_time'] = datetime.now(timezone.utc)
+            self.active_workflows[workflow_id]["status"] = "completed"
+            self.active_workflows[workflow_id]["end_time"] = datetime.now(timezone.utc)
 
             logger.info(f"Completed revenue workflow {workflow_id} for lead {lead_id}")
 
         except Exception as e:
             logger.error(f"Revenue workflow failed: {e}")
-            self.active_workflows[workflow_id]['status'] = 'failed'
+            self.active_workflows[workflow_id]["status"] = "failed"
 
     # Helper methods
     async def _get_lead(self, lead_id: str) -> Optional[dict]:
@@ -892,9 +927,15 @@ class AutonomousRevenueSystem:
 
             lead_id = str(uuid.uuid4())
             lead_email = (lead_data.get("email") or "").strip() or None
-            metadata = lead_data.get("metadata") if isinstance(lead_data.get("metadata"), dict) else {}
+            metadata = (
+                lead_data.get("metadata") if isinstance(lead_data.get("metadata"), dict) else {}
+            )
             buying_signals = lead_data.get("buying_signals")
-            if isinstance(buying_signals, list) and buying_signals and "buying_signals" not in metadata:
+            if (
+                isinstance(buying_signals, list)
+                and buying_signals
+                and "buying_signals" not in metadata
+            ):
                 metadata = {**metadata, "buying_signals": buying_signals}
 
             value_estimate = _coerce_value_estimate(
@@ -918,7 +959,8 @@ class AutonomousRevenueSystem:
             if stage_value not in valid_stages:
                 stage_value = LeadStage.NEW.value
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO revenue_leads
                 (id, company_name, contact_name, email, phone, website, source, stage, score, value_estimate, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -935,19 +977,21 @@ class AutonomousRevenueSystem:
                     metadata = COALESCE(revenue_leads.metadata, '{}'::jsonb) || COALESCE(EXCLUDED.metadata, '{}'::jsonb),
                     updated_at = NOW()
                 RETURNING id
-            """, (
-                lead_id,
-                lead_data.get('company_name'),
-                lead_data.get('contact_name'),
-                lead_email,
-                lead_data.get('phone'),
-                lead_data.get('website'),
-                lead_data.get('source', 'ai_discovery'),
-                stage_value,
-                normalized_score,
-                value_estimate,
-                json.dumps(metadata)
-            ))
+            """,
+                (
+                    lead_id,
+                    lead_data.get("company_name"),
+                    lead_data.get("contact_name"),
+                    lead_email,
+                    lead_data.get("phone"),
+                    lead_data.get("website"),
+                    lead_data.get("source", "ai_discovery"),
+                    stage_value,
+                    normalized_score,
+                    value_estimate,
+                    json.dumps(metadata),
+                ),
+            )
 
             row = cursor.fetchone()
             conn.commit()
@@ -962,10 +1006,7 @@ class AutonomousRevenueSystem:
             return None
 
     async def _await_lead_response(
-        self,
-        lead_id: str,
-        timeout_seconds: int = 3600,
-        poll_interval: int = 60
+        self, lead_id: str, timeout_seconds: int = 3600, poll_interval: int = 60
     ) -> bool:
         """Wait for a lead response recorded in lead_activities."""
         deadline = datetime.now(timezone.utc) + timedelta(seconds=timeout_seconds)
@@ -974,7 +1015,8 @@ class AutonomousRevenueSystem:
             try:
                 conn = psycopg2.connect(**DB_CONFIG)
                 cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT id, activity_type, event_type, created_at
                     FROM lead_activities
                     WHERE lead_id = %s
@@ -986,7 +1028,9 @@ class AutonomousRevenueSystem:
                       )
                     ORDER BY created_at DESC
                     LIMIT 1
-                """, (lead_id,))
+                """,
+                    (lead_id,),
+                )
                 row = cursor.fetchone()
                 cursor.close()
                 conn.close()
@@ -1004,18 +1048,21 @@ class AutonomousRevenueSystem:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO revenue_actions
                 (lead_id, action_type, action_data, result, success, executed_by)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                lead_id,
-                action.value,
-                json.dumps(data),
-                json.dumps({}),
-                True,
-                "autonomous_system"
-            ))
+            """,
+                (
+                    lead_id,
+                    action.value,
+                    json.dumps(data),
+                    json.dumps({}),
+                    True,
+                    "autonomous_system",
+                ),
+            )
 
             conn.commit()
             cursor.close()
@@ -1029,11 +1076,14 @@ class AutonomousRevenueSystem:
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE revenue_leads
                 SET stage = %s, updated_at = NOW()
                 WHERE id = %s
-            """, (stage.value, lead_id))
+            """,
+                (stage.value, lead_id),
+            )
 
             conn.commit()
             cursor.close()
@@ -1047,9 +1097,9 @@ class AutonomousRevenueSystem:
             from ai_advanced_providers import advanced_ai
 
             # Build search query from params
-            location = search_params.get('location', 'United States')
-            company_size = search_params.get('company_size', 'small to medium')
-            indicators = search_params.get('indicators', ['growth', 'hiring', 'expansion'])
+            location = search_params.get("location", "United States")
+            company_size = search_params.get("company_size", "small to medium")
+            indicators = search_params.get("indicators", ["growth", "hiring", "expansion"])
 
             discovery_prompt = f"""Search for roofing contractor businesses that need CRM/automation software.
 
@@ -1114,7 +1164,8 @@ Return ONLY valid JSON array, no other text."""
                 cur = conn.cursor(cursor_factory=RealDictCursor)
 
                 # First, check for existing leads in NEW or CONTACTED status
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT id, company_name, contact_name, email,
                            phone, website as location, source,
                            COALESCE(metadata->>'buying_signals', '[]')::jsonb as buying_signals,
@@ -1125,7 +1176,8 @@ Return ONLY valid JSON array, no other text."""
                       AND created_at > NOW() - INTERVAL '30 days'
                     ORDER BY value_estimate DESC NULLS LAST
                     LIMIT 10
-                """)
+                """
+                )
 
                 existing_leads = cur.fetchall()
                 if existing_leads:
@@ -1135,7 +1187,8 @@ Return ONLY valid JSON array, no other text."""
                     return [dict(lead) for lead in existing_leads]
 
                 # Second, find existing customers with upsell/cross-sell potential
-                cur.execute("""
+                cur.execute(
+                    """
                     SELECT DISTINCT
                         c.id::text as id,
                         c.company_name as company_name,
@@ -1161,17 +1214,22 @@ Return ONLY valid JSON array, no other text."""
                       )
                     ORDER BY estimated_value DESC
                     LIMIT 10
-                """)
+                """
+                )
 
                 customer_opportunities = cur.fetchall()
                 cur.close()
                 conn.close()
 
                 if customer_opportunities:
-                    logger.info(f"Found {len(customer_opportunities)} customer upsell opportunities")
+                    logger.info(
+                        f"Found {len(customer_opportunities)} customer upsell opportunities"
+                    )
                     return [dict(opp) for opp in customer_opportunities]
 
-                logger.info("No leads or opportunities found - need Perplexity API for cold outreach")
+                logger.info(
+                    "No leads or opportunities found - need Perplexity API for cold outreach"
+                )
                 return []
 
             except Exception as db_error:
@@ -1213,17 +1271,17 @@ Return ONLY valid JSON array, no other text."""
             # Fallback
             base_price = 5000
             return {
-                'base': base_price,
-                'total': base_price * 1.2,
-                'discount': 0,
-                'terms': '50% upfront, 50% on completion',
-                'reasoning': 'Fallback pricing due to AI error'
+                "base": base_price,
+                "total": base_price * 1.2,
+                "discount": 0,
+                "terms": "50% upfront, 50% on completion",
+                "reasoning": "Fallback pricing due to AI error",
             }
 
     async def _schedule_email(self, email_data: dict):
         """Schedule email for sending"""
         try:
-            recipient = email_data.get('to')
+            recipient = email_data.get("to")
             if not recipient:
                 logger.warning("Email missing recipient; not queued")
                 return
@@ -1239,31 +1297,34 @@ Return ONLY valid JSON array, no other text."""
                         scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
                 except ValueError:
                     scheduled_for = datetime.now(timezone.utc)
-            metadata = email_data.get('metadata') or {}
+            metadata = email_data.get("metadata") or {}
             if isinstance(metadata, str):
                 try:
                     metadata = json.loads(metadata)
                 except json.JSONDecodeError:
                     metadata = {}
-            metadata['is_test'] = bool(email_data.get('is_test')) or _is_test_email(recipient)
+            metadata["is_test"] = bool(email_data.get("is_test")) or _is_test_email(recipient)
 
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
             # Store email in outbound queue
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_email_queue
                 (id, recipient, subject, body, scheduled_for, status, metadata)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """, (
-                str(uuid.uuid4()),
-                recipient,
-                email_data.get('subject'),
-                email_data.get('body'),
-                scheduled_for,
-                'queued',
-                json.dumps(metadata)
-            ))
+            """,
+                (
+                    str(uuid.uuid4()),
+                    recipient,
+                    email_data.get("subject"),
+                    email_data.get("body"),
+                    scheduled_for,
+                    "queued",
+                    json.dumps(metadata),
+                ),
+            )
 
             conn.commit()
             cursor.close()
@@ -1280,20 +1341,23 @@ Return ONLY valid JSON array, no other text."""
             cursor = conn.cursor()
 
             opp_id = str(uuid.uuid4())
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO revenue_opportunities
                 (id, lead_id, title, value, probability, expected_close_date, stage)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
-            """, (
-                opp_id,
-                lead_id,
-                "Roofing Services Opportunity",
-                value,
-                0.5,
-                datetime.now(timezone.utc) + timedelta(days=30),
-                "proposal_sent"
-            ))
+            """,
+                (
+                    opp_id,
+                    lead_id,
+                    "Roofing Services Opportunity",
+                    value,
+                    0.5,
+                    datetime.now(timezone.utc) + timedelta(days=30),
+                    "proposal_sent",
+                ),
+            )
 
             conn.commit()
             cursor.close()
@@ -1312,31 +1376,37 @@ Return ONLY valid JSON array, no other text."""
 
             # Create nurture campaign
             campaign_id = str(uuid.uuid4())
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_nurture_campaigns
                 (id, lead_id, campaign_type, status, next_touch_date, touch_count)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                campaign_id,
-                lead_id,
-                'educational_drip',
-                'active',
-                datetime.now(timezone.utc) + timedelta(days=3),
-                0
-            ))
+            """,
+                (
+                    campaign_id,
+                    lead_id,
+                    "educational_drip",
+                    "active",
+                    datetime.now(timezone.utc) + timedelta(days=3),
+                    0,
+                ),
+            )
 
             # Schedule first touch
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_campaign_touches
                 (id, campaign_id, touch_type, scheduled_for, content_template)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (
-                str(uuid.uuid4()),
-                campaign_id,
-                'email',
-                datetime.now(timezone.utc) + timedelta(days=3),
-                'educational_content_1'
-            ))
+            """,
+                (
+                    str(uuid.uuid4()),
+                    campaign_id,
+                    "email",
+                    datetime.now(timezone.utc) + timedelta(days=3),
+                    "educational_content_1",
+                ),
+            )
 
             conn.commit()
             cursor.close()
@@ -1370,15 +1440,12 @@ Return ONLY valid JSON array, no other text."""
                     max_tokens=1200,
                 )
             )
-            docs['generated_at'] = datetime.now(timezone.utc).isoformat()
+            docs["generated_at"] = datetime.now(timezone.utc).isoformat()
             return docs
 
         except Exception as e:
             logger.error(f"Document generation failed: {e}")
-            return {
-                "error": str(e),
-                "status": "failed"
-            }
+            return {"error": str(e), "status": "failed"}
 
     async def _initiate_onboarding(self, lead_id: str):
         """Initiate customer onboarding"""
@@ -1388,41 +1455,40 @@ Return ONLY valid JSON array, no other text."""
 
             # Create onboarding record
             onboarding_id = str(uuid.uuid4())
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_onboarding_workflows
                 (id, lead_id, status, current_step, total_steps, started_at)
                 VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                onboarding_id,
-                lead_id,
-                'in_progress',
-                1,
-                5,
-                datetime.now(timezone.utc)
-            ))
+            """,
+                (onboarding_id, lead_id, "in_progress", 1, 5, datetime.now(timezone.utc)),
+            )
 
             # Create onboarding steps
             steps = [
-                ('welcome_email', 'Send welcome email and credentials'),
-                ('data_collection', 'Collect necessary customer information'),
-                ('system_setup', 'Configure customer account and preferences'),
-                ('training_schedule', 'Schedule training sessions'),
-                ('first_project', 'Initiate first project or service')
+                ("welcome_email", "Send welcome email and credentials"),
+                ("data_collection", "Collect necessary customer information"),
+                ("system_setup", "Configure customer account and preferences"),
+                ("training_schedule", "Schedule training sessions"),
+                ("first_project", "Initiate first project or service"),
             ]
 
             for idx, (step_name, description) in enumerate(steps, 1):
-                cursor.execute("""
+                cursor.execute(
+                    """
                     INSERT INTO ai_onboarding_steps
                     (id, workflow_id, step_number, step_name, description, status)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                """, (
-                    str(uuid.uuid4()),
-                    onboarding_id,
-                    idx,
-                    step_name,
-                    description,
-                    'pending' if idx > 1 else 'in_progress'
-                ))
+                """,
+                    (
+                        str(uuid.uuid4()),
+                        onboarding_id,
+                        idx,
+                        step_name,
+                        description,
+                        "pending" if idx > 1 else "in_progress",
+                    ),
+                )
 
             conn.commit()
             cursor.close()
@@ -1437,9 +1503,9 @@ Return ONLY valid JSON array, no other text."""
     async def _generate_negotiation_response(self, lead_id: str, analysis: dict) -> dict:
         """Generate negotiation response based on analysis"""
         return {
-            'response': "We understand your concerns and are happy to work with you...",
-            'concessions': analysis.get('suggested_concessions', []),
-            'next_steps': "Schedule a call to finalize terms"
+            "response": "We understand your concerns and are happy to work with you...",
+            "concessions": analysis.get("suggested_concessions", []),
+            "next_steps": "Schedule a call to finalize terms",
         }
 
     async def _update_opportunity_stage(self, lead_id: str, stage: str):
@@ -1448,11 +1514,14 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE revenue_opportunities
                 SET stage = %s, updated_at = NOW()
                 WHERE lead_id = %s
-            """, (stage, lead_id))
+            """,
+                (stage, lead_id),
+            )
 
             conn.commit()
             cursor.close()
@@ -1514,25 +1583,28 @@ Return ONLY valid JSON array, no other text."""
             cursor = conn.cursor()
 
             sequence_id = str(uuid.uuid4())
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_email_sequences
                 (id, lead_id, sequence_type, emails, created_at, status)
                 VALUES (%s, %s, %s, %s, NOW(), %s)
-            """, (sequence_id, lead_id, sequence_type, json.dumps(sequence), 'active'))
+            """,
+                (sequence_id, lead_id, sequence_type, json.dumps(sequence), "active"),
+            )
 
             conn.commit()
             cursor.close()
             conn.close()
 
             await self._log_to_unified_brain(
-                action='email_sequence_generated',
+                action="email_sequence_generated",
                 lead_id=lead_id,
                 sequence_type=sequence_type,
-                emails_count=len(sequence.get('emails', []))
+                emails_count=len(sequence.get("emails", [])),
             )
 
             logger.info(f"Generated {sequence_type} email sequence for lead {lead_id}")
-            return {'sequence_id': sequence_id, 'emails': sequence}
+            return {"sequence_id": sequence_id, "emails": sequence}
 
         except Exception as e:
             logger.error(f"Failed to generate email sequence: {e}")
@@ -1579,21 +1651,24 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_competitor_analysis
                 (id, lead_id, competitors, analysis, created_at)
                 VALUES (%s, %s, %s, %s, NOW())
-            """, (str(uuid.uuid4()), lead_id, json.dumps(competitors or []), json.dumps(analysis)))
+            """,
+                (str(uuid.uuid4()), lead_id, json.dumps(competitors or []), json.dumps(analysis)),
+            )
 
             conn.commit()
             cursor.close()
             conn.close()
 
             await self._log_to_unified_brain(
-                action='competitor_analysis',
+                action="competitor_analysis",
                 lead_id=lead_id,
                 competitors=competitors,
-                analysis=analysis
+                analysis=analysis,
             )
 
             return analysis
@@ -1611,12 +1686,15 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT * FROM revenue_actions
                 WHERE lead_id = %s
                 ORDER BY created_at DESC
                 LIMIT 50
-            """, (lead_id,))
+            """,
+                (lead_id,),
+            )
 
             actions = cursor.fetchall()
             cursor.close()
@@ -1665,27 +1743,30 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_churn_predictions
                 (id, lead_id, churn_probability, risk_level, prediction_data, created_at)
                 VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (
-                str(uuid.uuid4()),
-                lead_id,
-                prediction.get('churn_probability', 0),
-                prediction.get('risk_level', 'unknown'),
-                json.dumps(prediction)
-            ))
+            """,
+                (
+                    str(uuid.uuid4()),
+                    lead_id,
+                    prediction.get("churn_probability", 0),
+                    prediction.get("risk_level", "unknown"),
+                    json.dumps(prediction),
+                ),
+            )
 
             conn.commit()
             cursor.close()
             conn.close()
 
             await self._log_to_unified_brain(
-                action='churn_prediction',
+                action="churn_prediction",
                 lead_id=lead_id,
-                churn_risk=prediction.get('churn_probability'),
-                risk_level=prediction.get('risk_level')
+                churn_risk=prediction.get("churn_probability"),
+                risk_level=prediction.get("risk_level"),
             )
 
             return prediction
@@ -1744,26 +1825,36 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_upsell_recommendations
                 (id, lead_id, recommendations, total_potential, created_at)
                 VALUES (%s, %s, %s, %s, NOW())
-            """, (
-                str(uuid.uuid4()),
-                lead_id,
-                json.dumps(recommendations),
-                sum([r.get('expected_revenue', 0) for r in recommendations.get('opportunities', [])])
-            ))
+            """,
+                (
+                    str(uuid.uuid4()),
+                    lead_id,
+                    json.dumps(recommendations),
+                    sum(
+                        [
+                            r.get("expected_revenue", 0)
+                            for r in recommendations.get("opportunities", [])
+                        ]
+                    ),
+                ),
+            )
 
             conn.commit()
             cursor.close()
             conn.close()
 
             await self._log_to_unified_brain(
-                action='upsell_recommendations',
+                action="upsell_recommendations",
                 lead_id=lead_id,
-                opportunities_count=len(recommendations.get('opportunities', [])),
-                total_potential=sum([r.get('expected_revenue', 0) for r in recommendations.get('opportunities', [])])
+                opportunities_count=len(recommendations.get("opportunities", [])),
+                total_potential=sum(
+                    [r.get("expected_revenue", 0) for r in recommendations.get("opportunities", [])]
+                ),
             )
 
             return recommendations
@@ -1779,7 +1870,8 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG, cursor_factory=RealDictCursor)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     DATE_TRUNC('month', created_at) as month,
                     COUNT(*) as leads,
@@ -1790,11 +1882,13 @@ Return ONLY valid JSON array, no other text."""
                 WHERE created_at > NOW() - INTERVAL '12 months'
                 GROUP BY DATE_TRUNC('month', created_at)
                 ORDER BY month
-            """)
+            """
+            )
 
             historical = cursor.fetchall()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 SELECT
                     stage,
                     COUNT(*) as count,
@@ -1802,7 +1896,8 @@ Return ONLY valid JSON array, no other text."""
                 FROM revenue_leads
                 WHERE stage IN ('qualified', 'proposal_sent', 'negotiating')
                 GROUP BY stage
-            """)
+            """
+            )
 
             pipeline = cursor.fetchall()
             cursor.close()
@@ -1842,21 +1937,26 @@ Return ONLY valid JSON array, no other text."""
             cursor = conn.cursor()
 
             forecast_id = str(uuid.uuid4())
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO ai_revenue_forecasts
                 (id, months_ahead, forecast_data, created_at)
                 VALUES (%s, %s, %s, NOW())
-            """, (forecast_id, months_ahead, json.dumps(forecast)))
+            """,
+                (forecast_id, months_ahead, json.dumps(forecast)),
+            )
 
             conn.commit()
             cursor.close()
             conn.close()
 
             await self._log_to_unified_brain(
-                action='revenue_forecast',
+                action="revenue_forecast",
                 months_ahead=months_ahead,
                 forecast_id=forecast_id,
-                total_forecast=sum([m.get('expected_revenue', 0) for m in forecast.get('monthly_forecast', [])])
+                total_forecast=sum(
+                    [m.get("expected_revenue", 0) for m in forecast.get("monthly_forecast", [])]
+                ),
             )
 
             return forecast
@@ -1871,16 +1971,14 @@ Return ONLY valid JSON array, no other text."""
             conn = psycopg2.connect(**DB_CONFIG)
             cursor = conn.cursor()
 
-            cursor.execute("""
+            cursor.execute(
+                """
                 INSERT INTO unified_brain_logs
                 (id, system, action, data, created_at)
                 VALUES (%s, %s, %s, %s, NOW())
-            """, (
-                str(uuid.uuid4()),
-                'revenue_generation_system',
-                action,
-                json.dumps(kwargs)
-            ))
+            """,
+                (str(uuid.uuid4()), "revenue_generation_system", action, json.dumps(kwargs)),
+            )
 
             conn.commit()
             cursor.close()
@@ -1890,8 +1988,10 @@ Return ONLY valid JSON array, no other text."""
             # Non-critical - don't fail on logging errors
             logger.warning(f"Failed to log to unified brain: {e}")
 
+
 # Global instance - create lazily
 revenue_system = None
+
 
 def get_revenue_system():
     """Get or create revenue system instance"""

@@ -113,7 +113,7 @@ class UpsellEngine:
                 FROM gumroad_sales s1
                 LEFT JOIN gumroad_sales s2 ON s1.email = s2.email AND s2.product_code = $2
                 WHERE s1.product_code = ANY($1)
-                AND s1.sale_timestamp < NOW() - INTERVAL '3 days' -- Using rule delay
+                AND s1.sale_timestamp < NOW() - make_interval(days => $4) -- Using per-rule delay_days
                 AND s2.email IS NULL
                 LIMIT $3
             """
@@ -122,7 +122,11 @@ class UpsellEngine:
             try:
                 # We'll use the fallback logic for now as it's safer
                 rows = await pool.fetch(
-                    fallback_query, rule["trigger_product"], rule["target_product"], limit
+                    fallback_query,
+                    rule["trigger_product"],
+                    rule["target_product"],
+                    limit,
+                    rule["delay_days"],
                 )
 
                 outreach = get_outreach_engine()
@@ -136,11 +140,20 @@ class UpsellEngine:
                     )
                     lead_id = str(lead["id"]) if lead else None
 
-                    # If lead doesn't exist, create it?
-                    # Yes, any paying customer is a lead.
                     if not lead_id:
-                        # Skip for now to keep it simple, or log it
-                        continue
+                        # Auto-create a lead for paying Gumroad customers
+                        new_lead = await pool.fetchrow(
+                            """INSERT INTO revenue_leads (email, source, stage, metadata)
+                               VALUES ($1, 'gumroad', 'WON', '{}')
+                               ON CONFLICT (email) DO UPDATE SET source = 'gumroad'
+                               RETURNING id""",
+                            email,
+                        )
+                        if new_lead:
+                            lead_id = str(new_lead["id"])
+                        else:
+                            logger.warning(f"Could not create lead for {email}")
+                            continue
 
                     # Generate Draft
                     success, _, draft = await outreach.generate_outreach_draft(

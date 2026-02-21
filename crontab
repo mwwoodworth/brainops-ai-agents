@@ -1,3 +1,8 @@
-# Memory sync cron job - runs every 5 minutes to ensure perfect sync
-# WORKDIR in Dockerfile is /app, Python packages are in /root/.local
-*/5 * * * * cd /app && PYTHONPATH=/root/.local/lib/python3.11/site-packages python memory_sync_cron.py >> /var/log/memory_sync.log 2>&1
+# Memory sync cron job - DISABLED
+# Reason: memory_sync_cron.py was archived and no longer exists.
+# Additionally, cron is never started in the Docker container (no cron service in Dockerfile).
+# The PYTHONPATH also incorrectly referenced /root/ but the container runs as appuser.
+# Keeping this file for documentation purposes only.
+#
+# Original entry (do not re-enable without creating the script and fixing the path):
+# */5 * * * * cd /app && PYTHONPATH=/root/.local/lib/python3.11/site-packages python memory_sync_cron.py >> /var/log/memory_sync.log 2>&1
