@@ -2804,6 +2804,22 @@ except (ImportError, Exception) as e:
     logger.warning(f"Product Agent not available: {e}")
 
 
+# Root endpoint - public, no auth required
+@app.get("/")
+@limiter.limit("60/minute")
+async def root(request: Request):
+    """Root endpoint"""
+    return {
+        "service": config.service_name,
+        "version": VERSION,
+        "status": "operational",
+        "build": BUILD_TIME,
+        "environment": config.environment,
+        "ai_enabled": AI_AVAILABLE,
+        "scheduler_enabled": SCHEDULER_AVAILABLE,
+    }
+
+
 @app.exception_handler(DatabaseUnavailableError)
 async def database_unavailable_handler(request: Request, exc: DatabaseUnavailableError):
     """Surface database connectivity issues with a 503 response."""

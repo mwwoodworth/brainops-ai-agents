@@ -403,25 +403,6 @@ class ErpAnalyzeRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Root
-# ---------------------------------------------------------------------------
-
-
-@router.get("/")
-async def root(request: Request):
-    """Root endpoint"""
-    return {
-        "service": config.service_name,
-        "version": _version(),
-        "status": "operational",
-        "build": _build_time(),
-        "environment": config.environment,
-        "ai_enabled": _ai_available(),
-        "scheduler_enabled": _scheduler_available(),
-    }
-
-
-# ---------------------------------------------------------------------------
 # Email Endpoints
 # ---------------------------------------------------------------------------
 

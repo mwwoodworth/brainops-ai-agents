@@ -106,25 +106,20 @@ def _empty_fetch(*_args, **_kwargs):
 
 
 class TestPlatformRoot:
-    """GET / — root endpoint returning service info."""
+    """GET / — root endpoint returning service info (public, no auth required)."""
 
-    async def test_returns_200_with_auth(self, client, auth_headers, monkeypatch):
-        """Root endpoint returns 200 when authenticated."""
+    async def test_returns_200_without_auth(self, client, monkeypatch):
+        """Root endpoint returns 200 without auth (public route)."""
         monkeypatch.setattr(ai_app, "AI_AVAILABLE", False)
         monkeypatch.setattr(ai_app, "SCHEDULER_AVAILABLE", False)
-        response = await client.get("/", headers=auth_headers)
+        response = await client.get("/")
         assert response.status_code == 200
 
-    async def test_rejects_unauthenticated_requests(self, client):
-        """Root endpoint enforces auth."""
-        response = await client.get("/")
-        assert response.status_code == 403
-
-    async def test_response_contains_service_and_status(self, client, auth_headers, monkeypatch):
+    async def test_response_contains_service_and_status(self, client, monkeypatch):
         """Envelope must contain service, version, status keys."""
         monkeypatch.setattr(ai_app, "AI_AVAILABLE", False)
         monkeypatch.setattr(ai_app, "SCHEDULER_AVAILABLE", False)
-        response = await client.get("/", headers=auth_headers)
+        response = await client.get("/")
         assert response.status_code == 200
         data = response.json()
         assert "service" in data
