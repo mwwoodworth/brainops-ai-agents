@@ -329,12 +329,14 @@ from api.pipeline import (
 )  # Pipeline State Machine - ledger-backed state transitions
 from api.proposals import (
     router as proposals_router,
+    proposals_startup,
 )  # Proposal Engine - draft/approve/send workflow
 from api.outreach import (
     router as outreach_router,
 )  # Outreach Engine - lead enrichment and sequences
 from api.payments import (
     router as payments_router,
+    payments_startup,
 )  # Payment Capture - invoices and revenue collection
 from api.communications import (
     router as communications_router,
@@ -1276,6 +1278,18 @@ async def lifespan(app: FastAPI):
                     logger.error(f"Schema verification failed: {e}")
 
             create_safe_task(verify_schema(), "schema_verify")
+
+            # Run router startup hooks (migrated from deprecated @router.on_event)
+            try:
+                await payments_startup()
+                logger.info("✅ Payments startup complete")
+            except Exception as ps_exc:
+                logger.error("Payments startup failed: %s", ps_exc)
+            try:
+                await proposals_startup()
+                logger.info("✅ Proposals startup complete")
+            except Exception as pr_exc:
+                logger.error("Proposals startup failed: %s", pr_exc)
         except Exception as e:
             app.state.db_init_error = str(e)
             logger.error(f"❌ Deferred database init failed: {e}")

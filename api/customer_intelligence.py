@@ -169,7 +169,7 @@ async def get_customer_intelligence(customer_id: str):
 
     except Exception as e:
         logger.error(f"Error generating customer intelligence: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 @router.post("/analyze-customer")
 async def trigger_customer_analysis(payload: CustomerAnalysisRequest):

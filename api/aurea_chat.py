@@ -842,7 +842,7 @@ async def get_work_history(hours: int = Query(24, ge=1, le=720, description="Hou
 
     except Exception as e:
         logger.error(f"Failed to get work history: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/what-are-you-doing")

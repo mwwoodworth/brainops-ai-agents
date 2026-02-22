@@ -111,7 +111,7 @@ async def verify_memory(request: VerifyMemoryRequest) -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Memory verification failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/status/{memory_id}")
@@ -171,7 +171,7 @@ async def get_verification_status(memory_id: str) -> dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to get verification status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -219,7 +219,7 @@ async def get_truth_backlog(
 
     except Exception as e:
         logger.error(f"Failed to get truth backlog: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -279,7 +279,7 @@ async def get_open_conflicts(
 
     except Exception as e:
         logger.error(f"Failed to get conflicts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/conflicts/{conflict_id}/resolve")
@@ -317,7 +317,7 @@ async def resolve_conflict(
 
     except Exception as e:
         logger.error(f"Failed to resolve conflict: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -393,7 +393,7 @@ async def query_audit_log(
 
     except Exception as e:
         logger.error(f"Failed to query audit log: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -487,4 +487,4 @@ async def get_enforcement_stats() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to get enforcement stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

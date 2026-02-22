@@ -230,7 +230,7 @@ async def generate_product(
         raise
     except Exception as e:
         logger.error(f"Product generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 async def _create_product_record(spec):
@@ -317,7 +317,7 @@ async def get_product_status(
         raise
     except Exception as e:
         logger.error(f"Status check error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/list")
@@ -347,7 +347,7 @@ async def list_products(
 
     except Exception as e:
         logger.error(f"List products error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/{product_id}/download")
@@ -392,7 +392,7 @@ async def download_product(
         raise
     except Exception as e:
         logger.error(f"Download error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 def _estimate_completion_time(product_type: ProductType, quality_tier: QualityTier) -> str:

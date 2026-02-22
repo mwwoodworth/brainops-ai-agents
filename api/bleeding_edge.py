@@ -289,7 +289,7 @@ async def run_ooda_cycle(
         return {"success": True, "result": result, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"OODA cycle failed: {e!r}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
     finally:
         _ooda_lock.release()
         gc.collect()
@@ -331,7 +331,7 @@ async def validate_response(
         }
     except Exception as e:
         logger.error(f"Hallucination validation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/hallucination/extract-claims")
@@ -350,7 +350,7 @@ async def extract_claims(text: str = Body(...)) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Claim extraction failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Live Memory Brain Endpoints
@@ -383,7 +383,7 @@ async def store_memory(
         return {"success": True, "memory_id": memory_id, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Memory storage failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/memory/recall")
@@ -402,7 +402,7 @@ async def recall_memory(query: str = Body(...), limit: int = Body(5)) -> dict[st
         }
     except Exception as e:
         logger.error(f"Memory recall failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/memory/status")
@@ -418,7 +418,7 @@ async def get_memory_status() -> dict[str, Any]:
         return {"status": status, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Memory status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Dependability Framework Endpoints
@@ -444,7 +444,7 @@ async def validate_operation(
         }
     except Exception as e:
         logger.error(f"Dependability validation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/dependability/status")
@@ -478,7 +478,7 @@ async def get_consciousness_status() -> dict[str, Any]:
         return {"status": status, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Consciousness status failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/consciousness/activate")
@@ -499,7 +499,7 @@ async def activate_consciousness() -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Consciousness activation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/consciousness/introspect")
@@ -519,7 +519,7 @@ async def run_introspection(context: dict[str, Any] = Body(default={})) -> dict[
         }
     except Exception as e:
         logger.error(f"Introspection failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Circuit Breaker Endpoints
@@ -561,7 +561,7 @@ async def trip_circuit(circuit_name: str = Body(...)) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Circuit trip failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/circuit-breaker/reset")
@@ -581,7 +581,7 @@ async def reset_circuit(circuit_name: str = Body(...)) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Circuit reset failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Combined Operations

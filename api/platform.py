@@ -754,7 +754,7 @@ async def api_v1_knowledge_graph_stats():
         }
     except Exception as e:
         logger.error(f"Knowledge graph stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/api/v1/knowledge/graph/extract")
@@ -777,7 +777,7 @@ async def api_v1_knowledge_graph_extract(hours_back: int = 24):
         }
     except Exception as e:
         logger.error(f"Knowledge graph extraction error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ---------------------------------------------------------------------------

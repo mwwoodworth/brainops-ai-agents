@@ -1237,7 +1237,7 @@ async def mcp_discover_tools():
         }
     except Exception as e:
         logger.error(f"Tool discovery error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/mcp/metrics")
@@ -1264,7 +1264,7 @@ async def mcp_get_metrics(server: str = None, tool: str = None):
         return {"metrics": metrics, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Metrics retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/mcp/history")
@@ -1294,7 +1294,7 @@ async def mcp_get_execution_history(limit: int = 100):
         }
     except Exception as e:
         logger.error(f"History retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/mcp/chain", dependencies=[Depends(verify_api_key)])
@@ -1371,7 +1371,7 @@ async def mcp_execute_chain(request: dict[str, Any]):
 
     except Exception as e:
         logger.error(f"Chain execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/mcp/chains")
@@ -1393,7 +1393,7 @@ async def mcp_get_chain_history(limit: int = 10):
         return {"chains": chains, "count": len(chains), "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Chain history retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/mcp/cache/clear", dependencies=[Depends(verify_api_key)])
@@ -1413,7 +1413,7 @@ async def mcp_clear_cache():
         }
     except Exception as e:
         logger.error(f"Cache clear error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/mcp/cache/toggle", dependencies=[Depends(verify_api_key)])
@@ -1437,7 +1437,7 @@ async def mcp_toggle_cache(enabled: bool):
         }
     except Exception as e:
         logger.error(f"Cache toggle error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/mcp/workflows")
@@ -1461,7 +1461,7 @@ async def mcp_get_workflows():
         }
     except Exception as e:
         logger.error(f"Workflows retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/mcp/workflow/execute", dependencies=[Depends(verify_api_key)])
@@ -1516,7 +1516,7 @@ async def mcp_execute_workflow(request: dict[str, Any]):
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Workflow execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/mcp/performance")
@@ -1539,7 +1539,7 @@ async def mcp_get_performance():
         return {"performance": metrics, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Performance metrics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 if __name__ == "__main__":

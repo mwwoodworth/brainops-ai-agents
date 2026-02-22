@@ -147,7 +147,7 @@ async def register_system(request: RegisterSystemRequest):
         }
     except Exception as e:
         logger.error(f"Failed to register system: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/systems")
@@ -299,7 +299,7 @@ async def get_system(system_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get system: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/systems/{system_id}/health-check")
@@ -388,7 +388,7 @@ async def trigger_deployment(request: DeploymentRequest):
         }
     except Exception as e:
         logger.error(f"Failed to deploy: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/deployments")
@@ -444,7 +444,7 @@ async def execute_bulk_command(request: BulkCommandRequest):
         }
     except Exception as e:
         logger.error(f"Failed to execute bulk command: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/groups")

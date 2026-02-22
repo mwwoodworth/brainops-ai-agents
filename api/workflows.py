@@ -178,7 +178,7 @@ async def list_workflow_types():
         return [WorkflowTypeInfo(**t) for t in types]
     except Exception as e:
         logger.error(f"Failed to list workflow types: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/start", response_model=WorkflowResponse)
@@ -215,7 +215,7 @@ async def start_workflow(request: WorkflowStartRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to start workflow: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/resume", response_model=WorkflowResponse)
@@ -245,7 +245,7 @@ async def resume_workflow(request: WorkflowResumeRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to resume workflow: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/status/{workflow_id}", response_model=WorkflowStatusResponse)
@@ -264,7 +264,7 @@ async def get_workflow_status(workflow_id: str):
 
     except Exception as e:
         logger.error(f"Failed to get workflow status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -295,7 +295,7 @@ async def get_pending_approvals(
 
     except Exception as e:
         logger.error(f"Failed to get pending approvals: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/approvals/submit")
@@ -334,7 +334,7 @@ async def submit_approval(request: ApprovalSubmitRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to submit approval: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -387,7 +387,7 @@ async def start_customer_onboarding(
 
     except Exception as e:
         logger.error(f"Failed to start onboarding: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/collection/start", response_model=WorkflowResponse)
@@ -426,7 +426,7 @@ async def start_invoice_collection(
 
     except Exception as e:
         logger.error(f"Failed to start collection: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/qualification/start", response_model=WorkflowResponse)
@@ -480,7 +480,7 @@ async def start_lead_qualification(
 
     except Exception as e:
         logger.error(f"Failed to start qualification: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/healing/start", response_model=WorkflowResponse)
@@ -532,7 +532,7 @@ async def start_system_healing(
 
     except Exception as e:
         logger.error(f"Failed to start healing: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================

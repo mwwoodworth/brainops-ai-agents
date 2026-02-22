@@ -74,7 +74,7 @@ async def run_verification(
             return {"verification_type": "full", **result}
     except Exception as e:
         logger.error(f"E2E verification failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Verification failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/verify")
@@ -139,7 +139,7 @@ async def get_last_report():
         return {"has_report": True, **report}
     except Exception as e:
         logger.error(f"Could not get last report: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/health-matrix")
@@ -177,7 +177,7 @@ async def get_health_matrix():
         }
     except Exception as e:
         logger.error(f"Could not get health matrix: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/verify/background")
@@ -262,7 +262,7 @@ async def list_verified_systems():
         }
     except Exception as e:
         logger.error(f"Could not list systems: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -311,7 +311,7 @@ async def run_ui_test(app_name: str, background_tasks: BackgroundTasks):
         }
     except Exception as e:
         logger.error(f"UI test failed for {app_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/ui/test-all")
@@ -363,7 +363,7 @@ async def run_all_ui_tests():
         }
     except Exception as e:
         logger.error(f"All UI tests failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/ui/status")
@@ -447,7 +447,7 @@ async def run_visual_ai_analysis(app_name: str):
         }
     except Exception as e:
         logger.error(f"Visual AI analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/ui/visual-ai-all")
@@ -495,7 +495,7 @@ async def run_all_visual_ai_analysis():
         }
     except Exception as e:
         logger.error(f"All visual AI analysis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/complete-verification")

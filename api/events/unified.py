@@ -706,7 +706,7 @@ async def publish_event(
 
     except Exception as e:
         logger.error(f"Failed to publish event: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to publish event: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 class ERPEventWebhook(BaseModel):
@@ -816,7 +816,8 @@ async def handle_erp_webhook(
         logger.error(f"ERP webhook error: {e}")
         if isinstance(e, HTTPException):
             raise
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/recent")
@@ -900,7 +901,7 @@ async def get_recent_events(
 
     except Exception as e:
         logger.error(f"Failed to get recent events: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/stats")
@@ -1030,7 +1031,7 @@ async def get_event_stats(
 
     except Exception as e:
         logger.error(f"Failed to get event stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/replay/{event_id}")
@@ -1098,7 +1099,7 @@ async def replay_event(
         raise
     except Exception as e:
         logger.error(f"Failed to replay event: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/subscriptions/channels")

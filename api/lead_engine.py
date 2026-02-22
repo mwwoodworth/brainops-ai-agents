@@ -257,7 +257,7 @@ async def relay_lead(request: Request, payload: RelayRequest):
         raise
     except Exception as e:
         logger.error(f"Lead relay error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Relay failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -424,4 +424,4 @@ async def lead_feedback(request: Request, payload: FeedbackRequest):
 
     except Exception as e:
         logger.error(f"Feedback processing error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

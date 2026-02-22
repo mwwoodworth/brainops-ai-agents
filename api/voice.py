@@ -123,7 +123,7 @@ async def generate_speech(request: TextToSpeechRequest, api_key: str = Depends(v
                     continue
                 break
 
-    raise HTTPException(status_code=500, detail=f"ElevenLabs error ({last_status}): {last_error}")
+    raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/call")
 async def make_call(request: OutboundCallRequest, api_key: str = Depends(verify_api_key)):
@@ -146,4 +146,4 @@ async def make_call(request: OutboundCallRequest, api_key: str = Depends(verify_
         return {"status": "initiated", "call_sid": call.sid}
     except Exception as e:
         logger.error(f"Twilio call failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

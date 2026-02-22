@@ -37,10 +37,11 @@ def _get_resolver():
     if _resolver is None:
         try:
             from autonomous_issue_resolver import get_resolver
+
             _resolver = get_resolver()
         except Exception as e:
             logger.error(f"Failed to load resolver: {e}")
-            raise HTTPException(status_code=503, detail=f"Resolver not available: {e}")
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable")
     return _resolver
 
 
@@ -62,7 +63,7 @@ async def resolver_root():
             "Resolve memory conflicts (merge/dedupe)",
             "Verify unverified memories (confidence-based)",
             "Apply unapplied insights (low-risk auto-apply)",
-            "Process pending proposals (auto-approve safe ones)"
+            "Process pending proposals (auto-approve safe ones)",
         ],
         "endpoints": {
             "GET /resolver/issues": "Get current system issues",
@@ -70,8 +71,8 @@ async def resolver_root():
             "POST /resolver/fix-all": "Run full resolution with details",
             "GET /resolver/stats": "Get resolution statistics",
             "POST /resolver/start": "Start continuous resolution",
-            "POST /resolver/stop": "Stop continuous resolution"
-        }
+            "POST /resolver/stop": "Stop continuous resolution",
+        },
     }
 
 
@@ -103,14 +104,14 @@ async def get_current_issues():
                 "stale_memories": issues["stale_memories"],
                 "unapplied_insights": issues["unapplied_insights"],
                 "pending_proposals": issues["pending_proposals"],
-                "total": issues["total_issues"]
-            }
+                "total": issues["total_issues"],
+            },
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get issues: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix")
@@ -137,13 +138,13 @@ async def run_resolution_cycle():
             "duration_seconds": result["duration_seconds"],
             "issues_reduced": result["issues_reduced"],
             "message": f"Fixed {result['total_fixed']} issues in {result['duration_seconds']}s",
-            "resolutions": result["resolutions"]
+            "resolutions": result["resolutions"],
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Resolution cycle failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix-all")
@@ -161,7 +162,7 @@ async def run_full_resolution():
         raise
     except Exception as e:
         logger.error(f"Full resolution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats")
@@ -178,15 +179,12 @@ async def get_resolution_stats():
     try:
         resolver = _get_resolver()
         stats = resolver.get_resolution_stats()
-        return {
-            "success": True,
-            "stats": stats
-        }
+        return {"success": True, "stats": stats}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to get stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/start")
@@ -203,11 +201,7 @@ async def start_continuous_resolution(background_tasks: BackgroundTasks):
         resolver = _get_resolver()
 
         if resolver._running:
-            return {
-                "success": False,
-                "message": "Resolver is already running",
-                "status": "running"
-            }
+            return {"success": False, "message": "Resolver is already running", "status": "running"}
 
         # Start in background
         background_tasks.add_task(resolver.start_continuous_resolution)
@@ -216,13 +210,13 @@ async def start_continuous_resolution(background_tasks: BackgroundTasks):
             "success": True,
             "message": "Autonomous resolution started",
             "status": "starting",
-            "interval_seconds": resolver.resolve_interval_seconds
+            "interval_seconds": resolver.resolve_interval_seconds,
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to start resolver: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/stop")
@@ -236,24 +230,16 @@ async def stop_continuous_resolution():
         resolver = _get_resolver()
 
         if not resolver._running:
-            return {
-                "success": False,
-                "message": "Resolver is not running",
-                "status": "stopped"
-            }
+            return {"success": False, "message": "Resolver is not running", "status": "stopped"}
 
         resolver.stop()
 
-        return {
-            "success": True,
-            "message": "Autonomous resolution stopped",
-            "status": "stopped"
-        }
+        return {"success": True, "message": "Autonomous resolution stopped", "status": "stopped"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Failed to stop resolver: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health")
@@ -267,16 +253,14 @@ async def resolver_health():
             "status": "healthy",
             "running": resolver._running,
             "total_cycles": stats.get("total_cycles", 0),
-            "total_fixed": stats.get("total_fixed", 0)
+            "total_fixed": stats.get("total_fixed", 0),
         }
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e)
-        }
+        return {"status": "unhealthy", "error": str(e)}
 
 
 # Quick fix endpoints for specific issue types
+
 
 @router.post("/fix/stuck-agents")
 async def fix_stuck_agents():
@@ -288,10 +272,11 @@ async def fix_stuck_agents():
             "success": result.success,
             "items_fixed": result.items_fixed,
             "action": result.action.value,
-            "details": result.details
+            "details": result.details,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix/memory-conflicts")
@@ -304,10 +289,11 @@ async def fix_memory_conflicts():
             "success": result.success,
             "items_fixed": result.items_fixed,
             "action": result.action.value,
-            "details": result.details
+            "details": result.details,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix/stale-memories")
@@ -320,10 +306,11 @@ async def fix_stale_memories():
             "success": result.success,
             "items_fixed": result.items_fixed,
             "action": result.action.value,
-            "details": result.details
+            "details": result.details,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix/insights")
@@ -336,10 +323,11 @@ async def fix_unapplied_insights():
             "success": result.success,
             "items_fixed": result.items_fixed,
             "action": result.action.value,
-            "details": result.details
+            "details": result.details,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/fix/proposals")
@@ -352,7 +340,8 @@ async def fix_pending_proposals():
             "success": result.success,
             "items_fixed": result.items_fixed,
             "action": result.action.value,
-            "details": result.details
+            "details": result.details,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")

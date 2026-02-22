@@ -185,7 +185,7 @@ async def store_context(
 
     except Exception as e:
         logger.error(f"❌ Store context failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/context/retrieve")
@@ -231,7 +231,7 @@ async def retrieve_context(
         raise
     except Exception as e:
         logger.error(f"❌ Retrieve context failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/context/search")
@@ -275,7 +275,7 @@ async def search_context(
 
     except Exception as e:
         logger.error(f"❌ Search context failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/context/stats")
@@ -289,7 +289,7 @@ async def get_stats(coordinator = Depends(get_coordinator)):
         }
     except Exception as e:
         logger.error(f"❌ Get stats failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============================================================================
@@ -357,7 +357,7 @@ async def resume_session(
         raise
     except Exception as e:
         logger.error(f"❌ Resume session failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/session/end/{session_id}")
@@ -381,7 +381,7 @@ async def end_session(
 
     except Exception as e:
         logger.error(f"❌ End session failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/session/message")
@@ -409,7 +409,7 @@ async def add_message(
 
     except Exception as e:
         logger.error(f"❌ Add message failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/session/task")
@@ -436,7 +436,7 @@ async def add_task(
 
     except Exception as e:
         logger.error(f"❌ Add task failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/session/context/{session_id}")
@@ -462,7 +462,7 @@ async def get_session_context(
         raise
     except Exception as e:
         logger.error(f"❌ Get session context failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============================================================================
@@ -499,7 +499,7 @@ async def handoff_to_agent(
 
     except Exception as e:
         logger.error(f"❌ Handoff failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/session/handoff/{session_id}")
@@ -528,7 +528,7 @@ async def get_handoff_context(
 
     except Exception as e:
         logger.error(f"❌ Get handoff context failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============================================================================

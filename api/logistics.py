@@ -123,4 +123,4 @@ async def optimize_schedule(request: ScheduleRequest):
         return result
     except Exception as e:
         logger.error(f"Scheduling error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

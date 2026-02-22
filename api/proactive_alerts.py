@@ -764,7 +764,7 @@ async def get_proactive_alerts(
 
     except Exception as e:
         logger.error(f"Error getting proactive alerts: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/opportunities")
@@ -809,7 +809,7 @@ async def get_revenue_opportunities(
 
     except Exception as e:
         logger.error(f"Error getting opportunities: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/analyze")
@@ -858,7 +858,7 @@ async def run_proactive_analysis(
 
     except Exception as e:
         logger.error(f"Error running proactive analysis: {e}")
-        raise HTTPException(status_code=500, detail=f"Analysis error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dashboard")
@@ -915,4 +915,4 @@ async def get_proactive_dashboard(
 
     except Exception as e:
         logger.error(f"Error getting dashboard: {e}")
-        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

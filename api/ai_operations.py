@@ -151,7 +151,7 @@ async def execute_langgraph_workflow(request: dict[str, Any]):
 
     except Exception as e:
         logger.error(f"LangGraph workflow error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/langgraph/status")
@@ -279,7 +279,7 @@ async def get_consciousness_status():
 
     except Exception as e:
         logger.error(f"Consciousness status check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ async def ai_self_assess(
 
     except Exception as e:
         logger.error(f"Self-assessment failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Self-assessment failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/ai/explain-reasoning")
@@ -552,7 +552,7 @@ async def ai_explain_reasoning(
     except Exception as e:
         logger.error(f"Reasoning explanation failed: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Reasoning explanation failed: {str(e)}"
+            status_code=500, detail="Internal server error"
         ) from e
 
 
@@ -588,7 +588,7 @@ async def ai_deep_reasoning(request: Request, body: ReasoningRequest):
 
     except Exception as e:
         logger.error(f"o1 reasoning failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Reasoning failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/ai/learn-from-mistake")
@@ -647,7 +647,7 @@ async def ai_learn_from_mistake(
     except Exception as e:
         logger.error(f"Learning from mistake failed: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Learning from mistake failed: {str(e)}"
+            status_code=500, detail="Internal server error"
         ) from e
 
 
@@ -732,7 +732,7 @@ async def get_self_awareness_stats():
 
     except Exception as e:
         logger.error(f"Failed to get self-awareness stats: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve stats: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ---------------------------------------------------------------------------
@@ -781,7 +781,7 @@ async def get_task_stats():
 
     except Exception as e:
         logger.error(f"Failed to get task stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/ai/orchestrate")
@@ -805,7 +805,7 @@ async def orchestrate_complex_workflow(
 
     except Exception as e:
         logger.error(f"Orchestration failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/ai/analyze")
@@ -942,4 +942,4 @@ async def ai_analyze(request: Request, payload: AIAnalyzeRequest = Body(...)):
 
     except Exception as e:
         logger.error(f"AI analyze failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

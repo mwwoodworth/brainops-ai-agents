@@ -178,7 +178,7 @@ class IntegrationPipeline:
             }
         except Exception as e:
             logger.error(f"Training error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     # =========================================================================
     # LEARNING SYSTEM INTEGRATION
@@ -222,7 +222,7 @@ class IntegrationPipeline:
             }
         except Exception as e:
             logger.error(f"Learning error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     # =========================================================================
     # SPECIALIZED AGENT INTEGRATION
@@ -255,7 +255,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"System improvement error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     async def run_devops_optimization(self, target: str = "all") -> dict[str, Any]:
         """Run the DevOps Optimization Agent."""
@@ -274,7 +274,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"DevOps optimization error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     async def run_code_quality(self, target: str = "all") -> dict[str, Any]:
         """Run the Code Quality Agent."""
@@ -293,7 +293,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"Code quality error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     async def run_customer_success(self, analysis_type: str = "health") -> dict[str, Any]:
         """Run the Customer Success Agent."""
@@ -312,7 +312,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"Customer success error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     async def run_competitive_intel(self, scope: str = "market") -> dict[str, Any]:
         """Run the Competitive Intelligence Agent."""
@@ -331,7 +331,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"Competitive intel error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     async def run_vision_alignment(self) -> dict[str, Any]:
         """Run the Vision Alignment Agent."""
@@ -350,7 +350,7 @@ class IntegrationPipeline:
             return result
         except Exception as e:
             logger.error(f"Vision alignment error: {e}")
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     # =========================================================================
     # FULL INTEGRATION - RUN ALL SYSTEMS

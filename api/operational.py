@@ -142,7 +142,7 @@ async def get_executions(
         raise
     except DatabaseUnavailableError as exc:
         logger.error("Database unavailable while loading executions", exc_info=True)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except Exception as e:
         logger.error(f"Failed to get executions: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve executions") from e
@@ -432,7 +432,7 @@ async def check_self_healing():
 
     except Exception as e:
         logger.error(f"Self-healing check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +606,7 @@ async def execute_aurea_nl_command(request: Request, payload: AureaCommandReques
 
     except Exception as e:
         logger.error(f"Natural language command execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +645,7 @@ async def capture_interaction(interaction_data: dict[str, Any] = Body(...)):
 
     except Exception as e:
         logger.error(f"Failed to capture interaction: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/training/stats")

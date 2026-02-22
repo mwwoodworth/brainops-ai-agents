@@ -37,24 +37,24 @@ async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
 
 # NOTE: Auth is handled at app.py level via SECURED_DEPENDENCIES
 # Don't add duplicate dependencies here - causes double auth failures
-router = APIRouter(
-    prefix="/api/neural",
-    tags=["neural-reconnection"]
-)
+router = APIRouter(prefix="/api/neural", tags=["neural-reconnection"])
 
 
 # ====================
 # Enums & Models
 # ====================
 
+
 class OperationMode(str, Enum):
     """Operation mode determines behavior"""
-    DRAFT = "draft"      # ERP: Return suggestions only
+
+    DRAFT = "draft"  # ERP: Return suggestions only
     EXECUTE = "execute"  # MRG: Perform actual operations
 
 
 class SyncResult(BaseModel):
     """Result of a sync operation"""
+
     success: bool
     leads_synced: int = 0
     leads_skipped: int = 0
@@ -65,6 +65,7 @@ class SyncResult(BaseModel):
 
 class ModeAwareResponse(BaseModel):
     """Response that includes mode context"""
+
     mode: OperationMode
     action_taken: str
     data: Any
@@ -76,10 +77,11 @@ class ModeAwareResponse(BaseModel):
 # Schema Sync Endpoints
 # ====================
 
+
 @router.post("/sync/leads-to-revenue", response_model=SyncResult)
 async def sync_leads_to_revenue_leads(
     limit: int = Query(default=100, le=1000, description="Max leads to sync per call"),
-    force_update: bool = Query(default=False, description="Update even if exists")
+    force_update: bool = Query(default=False, description="Update even if exists"),
 ):
     """
     Sync ERP leads table to AI revenue_leads table.
@@ -102,7 +104,8 @@ async def sync_leads_to_revenue_leads(
         pool = get_pool()
 
         # Fetch leads from ERP table
-        leads = await pool.fetch("""
+        leads = await pool.fetch(
+            """
             SELECT
                 id, name, email, phone, company, score, status, source,
                 description, tags, custom_fields, created_at, updated_at,
@@ -112,7 +115,9 @@ async def sync_leads_to_revenue_leads(
             WHERE email IS NOT NULL AND email != ''
             ORDER BY created_at DESC
             LIMIT $1
-        """, limit)
+        """,
+            limit,
+        )
 
         synced = 0
         skipped = 0
@@ -124,7 +129,8 @@ async def sync_leads_to_revenue_leads(
                 # Check if already exists in revenue_leads
                 existing = await pool.fetchrow(
                     "SELECT id FROM revenue_leads WHERE email = $1 OR lead_id = $2",
-                    lead['email'], str(lead['id'])
+                    lead["email"],
+                    str(lead["id"]),
                 )
 
                 if existing and not force_update:
@@ -133,34 +139,35 @@ async def sync_leads_to_revenue_leads(
 
                 # Map status to stage
                 status_to_stage = {
-                    'NEW': 'new',
-                    'CONTACTED': 'contacted',
-                    'QUALIFIED': 'qualified',
-                    'PROPOSAL': 'proposal_sent',
-                    'NEGOTIATING': 'negotiating',
-                    'WON': 'won',
-                    'LOST': 'lost'
+                    "NEW": "new",
+                    "CONTACTED": "contacted",
+                    "QUALIFIED": "qualified",
+                    "PROPOSAL": "proposal_sent",
+                    "NEGOTIATING": "negotiating",
+                    "WON": "won",
+                    "LOST": "lost",
                 }
-                stage = status_to_stage.get(str(lead.get('status', '')).upper(), 'new')
+                stage = status_to_stage.get(str(lead.get("status", "")).upper(), "new")
 
                 # Build metadata
                 metadata = {
-                    'synced_from_erp': True,
-                    'erp_lead_id': str(lead['id']),
-                    'company': lead.get('company', ''),
-                    'address': lead.get('address', ''),
-                    'roof_type': lead.get('roof_type', ''),
-                    'square_footage': lead.get('square_footage'),
-                    'urgency': lead.get('urgency', 'normal'),
-                    'insurance_claim': lead.get('insurance_claim', False),
-                    'budget_range': lead.get('budget_range', ''),
-                    'original_tags': lead.get('tags'),
-                    'original_custom_fields': lead.get('custom_fields')
+                    "synced_from_erp": True,
+                    "erp_lead_id": str(lead["id"]),
+                    "company": lead.get("company", ""),
+                    "address": lead.get("address", ""),
+                    "roof_type": lead.get("roof_type", ""),
+                    "square_footage": lead.get("square_footage"),
+                    "urgency": lead.get("urgency", "normal"),
+                    "insurance_claim": lead.get("insurance_claim", False),
+                    "budget_range": lead.get("budget_range", ""),
+                    "original_tags": lead.get("tags"),
+                    "original_custom_fields": lead.get("custom_fields"),
                 }
 
                 if existing:
                     # Update existing
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         UPDATE revenue_leads SET
                             company_name = COALESCE($1, company_name),
                             contact_name = COALESCE($2, contact_name),
@@ -172,19 +179,20 @@ async def sync_leads_to_revenue_leads(
                             updated_at = NOW()
                         WHERE id = $8
                     """,
-                        lead.get('company') or lead.get('name'),
-                        lead.get('name'),
-                        lead.get('phone'),
+                        lead.get("company") or lead.get("name"),
+                        lead.get("name"),
+                        lead.get("phone"),
                         stage,
-                        float(lead.get('score', 0) or 0),
-                        lead.get('source'),
+                        float(lead.get("score", 0) or 0),
+                        lead.get("source"),
                         metadata,
-                        existing['id']
+                        existing["id"],
                     )
                     updated += 1
                 else:
                     # Insert new
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         INSERT INTO revenue_leads (
                             id, company_name, contact_name, email, phone,
                             stage, score, source, metadata, lead_id,
@@ -194,17 +202,17 @@ async def sync_leads_to_revenue_leads(
                         )
                     """,
                         uuid4(),
-                        lead.get('company') or lead.get('name'),
-                        lead.get('name'),
-                        lead.get('email'),
-                        lead.get('phone'),
+                        lead.get("company") or lead.get("name"),
+                        lead.get("name"),
+                        lead.get("email"),
+                        lead.get("phone"),
                         stage,
-                        float(lead.get('score', 0) or 0),
-                        lead.get('source'),
+                        float(lead.get("score", 0) or 0),
+                        lead.get("source"),
                         metadata,
-                        str(lead['id']),
-                        float(lead.get('value_score', 0) or 5000),
-                        lead.get('created_at', datetime.now(timezone.utc))
+                        str(lead["id"]),
+                        float(lead.get("value_score", 0) or 5000),
+                        lead.get("created_at", datetime.now(timezone.utc)),
                     )
                     synced += 1
 
@@ -218,7 +226,7 @@ async def sync_leads_to_revenue_leads(
             leads_skipped=skipped,
             leads_updated=updated,
             message=f"Sync complete: {synced} new, {updated} updated, {skipped} skipped",
-            errors=errors[:10]  # Limit error list
+            errors=errors[:10],  # Limit error list
         )
 
     except DatabaseUnavailableError as e:
@@ -226,7 +234,7 @@ async def sync_leads_to_revenue_leads(
         raise HTTPException(status_code=503, detail="Database unavailable")
     except Exception as e:
         logger.error(f"Sync failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/sync/status")
@@ -238,18 +246,22 @@ async def get_sync_status():
         leads_count = await pool.fetchval("SELECT COUNT(*) FROM leads")
         revenue_leads_count = await pool.fetchval("SELECT COUNT(*) FROM revenue_leads")
 
-        synced_count = await pool.fetchval("""
+        synced_count = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM revenue_leads
             WHERE metadata->>'synced_from_erp' = 'true'
-        """)
+        """
+        )
 
-        unsynced_count = await pool.fetchval("""
+        unsynced_count = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM leads l
             WHERE NOT EXISTS (
                 SELECT 1 FROM revenue_leads rl
                 WHERE rl.email = l.email OR rl.lead_id = l.id::text
             )
-        """)
+        """
+        )
 
         return {
             "leads_table_count": leads_count,
@@ -257,23 +269,24 @@ async def get_sync_status():
             "synced_from_erp": synced_count,
             "unsynced_leads": unsynced_count,
             "sync_coverage": f"{((leads_count - unsynced_count) / max(leads_count, 1)) * 100:.1f}%",
-            "recommendation": "Run sync" if unsynced_count > 0 else "Tables synced"
+            "recommendation": "Run sync" if unsynced_count > 0 else "Tables synced",
         }
 
     except Exception as e:
         logger.error(f"Status check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ====================
 # Mode-Aware Endpoints
 # ====================
 
+
 @router.post("/leads/discover", response_model=ModeAwareResponse)
 async def discover_leads_with_mode(
     mode: OperationMode = Query(default=OperationMode.DRAFT),
     limit: int = Query(default=20, le=100),
-    lead_type: str = Query(default="all", regex="^(all|reengagement|upsell|referral)$")
+    lead_type: str = Query(default="all", pattern="^(all|reengagement|upsell|referral)$"),
 ):
     """
     Discover leads with mode-aware behavior.
@@ -285,7 +298,8 @@ async def discover_leads_with_mode(
         pool = get_pool()
 
         # Query for potential leads from customers table
-        leads = await pool.fetch("""
+        leads = await pool.fetch(
+            """
             SELECT DISTINCT ON (c.email)
                 c.id as customer_id,
                 COALESCE(c.company_name, c.first_name || ' ' || c.last_name) as company_name,
@@ -306,7 +320,9 @@ async def discover_leads_with_mode(
             HAVING MAX(j.created_at) < NOW() - INTERVAL '6 months' OR MAX(j.created_at) IS NULL
             ORDER BY c.email, avg_job_value DESC
             LIMIT $1
-        """, limit)
+        """,
+            limit,
+        )
 
         discovered = [dict(lead) for lead in leads]
 
@@ -320,7 +336,7 @@ async def discover_leads_with_mode(
                     "leads": discovered,
                     "criteria": "Customers with no jobs in 6+ months",
                 },
-                suggestion="Review these leads and approve for outreach. Click 'Approve' to add to CRM."
+                suggestion="Review these leads and approve for outreach. Click 'Approve' to add to CRM.",
             )
         else:
             # MRG Mode: Execute - add to revenue_leads and start sequence
@@ -330,12 +346,12 @@ async def discover_leads_with_mode(
             for lead in discovered:
                 try:
                     existing = await pool.fetchrow(
-                        "SELECT id FROM revenue_leads WHERE email = $1",
-                        lead['email']
+                        "SELECT id FROM revenue_leads WHERE email = $1", lead["email"]
                     )
 
                     if not existing:
-                        await pool.execute("""
+                        await pool.execute(
+                            """
                             INSERT INTO revenue_leads (
                                 id, company_name, contact_name, email, phone,
                                 stage, score, source, metadata, created_at
@@ -344,18 +360,18 @@ async def discover_leads_with_mode(
                             )
                         """,
                             uuid4(),
-                            lead['company_name'],
-                            lead['contact_name'],
-                            lead['email'],
-                            lead.get('phone'),
+                            lead["company_name"],
+                            lead["contact_name"],
+                            lead["email"],
+                            lead.get("phone"),
                             {
-                                'execution_id': execution_id,
-                                'customer_id': str(lead['customer_id']),
-                                'avg_job_value': float(lead.get('avg_job_value', 0)),
-                                'total_jobs': lead.get('total_jobs', 0),
-                                'mode': 'execute',
-                                'auto_added': True
-                            }
+                                "execution_id": execution_id,
+                                "customer_id": str(lead["customer_id"]),
+                                "avg_job_value": float(lead.get("avg_job_value", 0)),
+                                "total_jobs": lead.get("total_jobs", 0),
+                                "mode": "execute",
+                                "auto_added": True,
+                            },
                         )
                         added += 1
                 except Exception as e:
@@ -364,26 +380,22 @@ async def discover_leads_with_mode(
             return ModeAwareResponse(
                 mode=mode,
                 action_taken="leads_added_to_crm",
-                data={
-                    "leads_found": len(discovered),
-                    "leads_added": added,
-                    "leads": discovered
-                },
-                execution_id=execution_id
+                data={"leads_found": len(discovered), "leads_added": added, "leads": discovered},
+                execution_id=execution_id,
             )
 
     except DatabaseUnavailableError as e:
         raise HTTPException(status_code=503, detail="Database unavailable")
     except Exception as e:
         logger.error(f"Lead discovery failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/proposals/generate", response_model=ModeAwareResponse)
 async def generate_proposal_with_mode(
     lead_id: str,
     mode: OperationMode = Query(default=OperationMode.DRAFT),
-    include_financing: bool = Query(default=True)
+    include_financing: bool = Query(default=True),
 ):
     """
     Generate a proposal with mode-aware behavior.
@@ -395,9 +407,12 @@ async def generate_proposal_with_mode(
         pool = get_pool()
 
         # Get lead info
-        lead = await pool.fetchrow("""
+        lead = await pool.fetchrow(
+            """
             SELECT * FROM revenue_leads WHERE id::text = $1 OR lead_id = $1
-        """, lead_id)
+        """,
+            lead_id,
+        )
 
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -405,21 +420,27 @@ async def generate_proposal_with_mode(
         # Generate proposal data (simplified)
         proposal = {
             "lead_id": lead_id,
-            "company_name": lead['company_name'],
-            "contact_name": lead['contact_name'],
-            "email": lead['email'],
-            "estimated_value": float(lead.get('value_estimate', 0) or lead.get('estimated_value', 5000)),
+            "company_name": lead["company_name"],
+            "contact_name": lead["contact_name"],
+            "email": lead["email"],
+            "estimated_value": float(
+                lead.get("value_estimate", 0) or lead.get("estimated_value", 5000)
+            ),
             "items": [
                 {"description": "Professional Roofing Service", "price": 5000},
                 {"description": "Materials", "price": 2500},
-                {"description": "Labor", "price": 2000}
+                {"description": "Labor", "price": 2000},
             ],
             "subtotal": 9500,
             "tax": 760,
             "total": 10260,
             "financing_available": include_financing,
-            "valid_until": (datetime.now(timezone.utc).replace(day=1) +
-                          __import__('datetime').timedelta(days=32)).replace(day=1).isoformat()
+            "valid_until": (
+                datetime.now(timezone.utc).replace(day=1)
+                + __import__("datetime").timedelta(days=32)
+            )
+            .replace(day=1)
+            .isoformat(),
         }
 
         if mode == OperationMode.DRAFT:
@@ -427,14 +448,15 @@ async def generate_proposal_with_mode(
                 mode=mode,
                 action_taken="proposal_drafted",
                 data=proposal,
-                suggestion="Review the proposal details above. Click 'Send' to email to customer."
+                suggestion="Review the proposal details above. Click 'Send' to email to customer.",
             )
         else:
             # Execute mode - would send email
             execution_id = str(uuid4())
 
             # Queue the email (actual sending handled by email scheduler)
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO ai_email_queue (
                     id, recipient, subject, body, status, scheduled_for, metadata
                 ) VALUES (
@@ -442,83 +464,79 @@ async def generate_proposal_with_mode(
                 )
             """,
                 uuid4(),
-                lead['email'],
+                lead["email"],
                 f"Your Roofing Proposal from BrainStack",
                 f"Dear {lead['contact_name']},\n\nThank you for your interest. "
                 f"Please find your proposal attached with a total of ${proposal['total']:,.2f}.\n\n"
                 f"Best regards,\nBrainStack Team",
                 {
-                    'execution_id': execution_id,
-                    'lead_id': lead_id,
-                    'proposal': proposal,
-                    'mode': 'execute'
-                }
+                    "execution_id": execution_id,
+                    "lead_id": lead_id,
+                    "proposal": proposal,
+                    "mode": "execute",
+                },
             )
 
             # Update lead stage
-            await pool.execute("""
+            await pool.execute(
+                """
                 UPDATE revenue_leads SET stage = 'proposal_sent', updated_at = NOW()
                 WHERE id::text = $1 OR lead_id = $1
-            """, lead_id)
+            """,
+                lead_id,
+            )
 
             return ModeAwareResponse(
-                mode=mode,
-                action_taken="proposal_sent",
-                data=proposal,
-                execution_id=execution_id
+                mode=mode, action_taken="proposal_sent", data=proposal, execution_id=execution_id
             )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Proposal generation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # ====================
 # Engine Activation Endpoints
 # ====================
 
+
 @router.get("/engines/status")
 async def get_engine_status():
     """Check status of revenue engines"""
-    engines = {
-        "affiliate_pipeline": False,
-        "api_monetization": False,
-        "revenue_automation": False
-    }
+    engines = {"affiliate_pipeline": False, "api_monetization": False, "revenue_automation": False}
 
     try:
         from affiliate_partnership_pipeline import AffiliatePartnershipPipeline
+
         engines["affiliate_pipeline"] = True
     except ImportError:
         pass
 
     try:
         from api_monetization_engine import APIMonetizationEngine
+
         engines["api_monetization"] = True
     except ImportError:
         pass
 
     try:
         from revenue_automation_engine import RevenueAutomationEngine
+
         engines["revenue_automation"] = True
     except ImportError:
         pass
 
-    return {
-        "engines": engines,
-        "all_active": all(engines.values())
-    }
+    return {"engines": engines, "all_active": all(engines.values())}
 
 
 @router.post("/engines/affiliate/process")
-async def process_affiliate_pipeline(
-    mode: OperationMode = Query(default=OperationMode.DRAFT)
-):
+async def process_affiliate_pipeline(mode: OperationMode = Query(default=OperationMode.DRAFT)):
     """Process the affiliate partnership pipeline"""
     try:
         from affiliate_partnership_pipeline import AffiliatePartnershipPipeline
+
         pipeline = AffiliatePartnershipPipeline()
 
         if mode == OperationMode.DRAFT:
@@ -529,21 +547,30 @@ async def process_affiliate_pipeline(
                 data={
                     "description": "Affiliate partnership pipeline analysis",
                     "tiers": ["Bronze", "Silver", "Gold", "Diamond"],
-                    "commission_rates": {"Bronze": "20%", "Silver": "25%", "Gold": "30%", "Diamond": "35%"}
+                    "commission_rates": {
+                        "Bronze": "20%",
+                        "Silver": "25%",
+                        "Gold": "30%",
+                        "Diamond": "35%",
+                    },
                 },
-                suggestion="Run in execute mode to process affiliate applications and commissions"
+                suggestion="Run in execute mode to process affiliate applications and commissions",
             )
         else:
             # Would run the actual pipeline
-            result = await pipeline.run_discovery_cycle() if hasattr(pipeline, 'run_discovery_cycle') else {"status": "ready"}
+            result = (
+                await pipeline.run_discovery_cycle()
+                if hasattr(pipeline, "run_discovery_cycle")
+                else {"status": "ready"}
+            )
             return ModeAwareResponse(
                 mode=mode,
                 action_taken="affiliate_processed",
                 data=result,
-                execution_id=str(uuid4())
+                execution_id=str(uuid4()),
             )
     except ImportError:
         raise HTTPException(status_code=501, detail="Affiliate pipeline not available")
     except Exception as e:
         logger.error(f"Affiliate processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

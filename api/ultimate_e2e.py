@@ -26,11 +26,12 @@ async def _get_system():
     if _system is None:
         try:
             from ultimate_e2e_system import UltimateE2ESystem
+
             _system = UltimateE2ESystem()
             await _system.initialize()
         except Exception as e:
             logger.error(f"Failed to initialize Ultimate E2E System: {e}")
-            raise HTTPException(status_code=503, detail=f"System not available: {str(e)}") from e
+            raise HTTPException(status_code=503, detail="Service temporarily unavailable") from e
     return _system
 
 
@@ -63,11 +64,7 @@ async def get_service_builds(service_name: str):
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_name}")
 
     deploys = await system.get_render_deploys(service_name, limit=10)
-    return {
-        "service": service_name,
-        "deploys": deploys,
-        "count": len(deploys)
-    }
+    return {"service": service_name, "deploys": deploys, "count": len(deploys)}
 
 
 @router.get("/builds/{service_name}/{deploy_id}/logs")
@@ -79,12 +76,7 @@ async def get_deploy_logs(service_name: str, deploy_id: str):
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_name}")
 
     logs = await system.get_deploy_logs(service_name, deploy_id)
-    return {
-        "service": service_name,
-        "deploy_id": deploy_id,
-        "logs": logs,
-        "log_count": len(logs)
-    }
+    return {"service": service_name, "deploy_id": deploy_id, "logs": logs, "log_count": len(logs)}
 
 
 @router.get("/database")
@@ -147,7 +139,7 @@ async def get_issues(include_resolved: bool = False):
         "issues": issues,
         "total": len(issues),
         "critical": len([i for i in issues if i.get("severity") == "critical"]),
-        "unresolved": len([i for i in issues if not i.get("resolved")])
+        "unresolved": len([i for i in issues if not i.get("resolved")]),
     }
 
 
@@ -164,7 +156,9 @@ async def resolve_issue(issue_id: str, resolution_note: str = ""):
 
 
 @router.post("/start-monitoring")
-async def start_continuous_monitoring(background_tasks: BackgroundTasks, interval_seconds: int = 60):
+async def start_continuous_monitoring(
+    background_tasks: BackgroundTasks, interval_seconds: int = 60
+):
     """
     Start 24/7 continuous monitoring.
     Monitors: builds, services, database, issues.
@@ -185,7 +179,7 @@ async def start_continuous_monitoring(background_tasks: BackgroundTasks, interva
     return {
         "status": "started",
         "interval_seconds": interval_seconds,
-        "message": "24/7 continuous monitoring activated"
+        "message": "24/7 continuous monitoring activated",
     }
 
 
@@ -211,10 +205,7 @@ async def get_monitoring_status():
 
     is_running = _monitoring_task is not None and not _monitoring_task.done()
 
-    return {
-        "monitoring_active": is_running,
-        "status": "running" if is_running else "stopped"
-    }
+    return {"monitoring_active": is_running, "status": "running" if is_running else "stopped"}
 
 
 @router.get("/health")
@@ -227,7 +218,7 @@ async def health_check():
             "healthy": status.get("health_score", 0) >= 70,
             "health_score": status.get("health_score", 0),
             "health_status": status.get("health_status", "unknown"),
-            "issue_count": status.get("issue_count", {}).get("unresolved", 0)
+            "issue_count": status.get("issue_count", {}).get("unresolved", 0),
         }
     except Exception as e:
         return {"healthy": False, "error": str(e)}

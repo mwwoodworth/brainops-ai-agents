@@ -900,7 +900,7 @@ async def get_sales_analytics(include_test: bool = False):
 
     except Exception as e:
         logger.error(f"Analytics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/test", dependencies=[Depends(_require_internal_api_key)])

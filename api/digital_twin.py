@@ -115,7 +115,7 @@ async def create_twin(request: CreateTwinRequest):
         }
     except Exception as e:
         logger.error(f"Failed to create twin: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/twins")
@@ -230,7 +230,7 @@ async def get_twin(twin_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to get twin: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/twins/{twin_id}/sync")
@@ -319,7 +319,7 @@ async def run_simulation(twin_id: str, request: SimulationRequest):
         }
     except Exception as e:
         logger.error(f"Failed to run simulation: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/twins/{twin_id}/test-update")
@@ -349,7 +349,7 @@ async def test_update(twin_id: str, request: UpdateTestRequest):
         }
     except Exception as e:
         logger.error(f"Failed to test update: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.delete("/twins/{twin_id}")
@@ -371,7 +371,7 @@ async def delete_twin(twin_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to delete twin: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/deduplicate")
@@ -393,7 +393,7 @@ async def deduplicate_twins():
         }
     except Exception as e:
         logger.error(f"Failed to deduplicate twins: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/dashboard")
@@ -497,7 +497,8 @@ async def mcp_sync_twin(twin_id: str):
     except Exception as e:
         logger.error(f"MCP twin sync error: {e}")
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/twins/{twin_id}/mcp-simulate")
@@ -518,7 +519,8 @@ async def mcp_simulate_twin(twin_id: str, scenario: str = "default"):
     except Exception as e:
         logger.error(f"MCP twin simulation error: {e}")
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/mcp/infrastructure")
@@ -551,4 +553,5 @@ async def mcp_get_infrastructure_state():
     except Exception as e:
         logger.error(f"MCP infrastructure state error: {e}")
         from fastapi import HTTPException
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e

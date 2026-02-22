@@ -199,7 +199,7 @@ async def get_memory_status(tenant_id: str = Depends(get_tenant_id)) -> MemorySt
         raise
     except DatabaseUnavailableError as exc:
         logger.error("Memory status unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except Exception as e:
         logger.error("Failed to get memory status: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Unable to retrieve memory statistics") from e
@@ -462,9 +462,7 @@ async def search_memories(
         raise
     except Exception as e:
         logger.error("Memory search failed: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Search failed: {type(e).__name__}: {str(e)[:200]}"
-        ) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/store")
@@ -556,14 +554,12 @@ async def store_memory(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory store unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to store memory: %s", e, exc_info=True)
-        raise HTTPException(
-            status_code=500, detail=f"Store failed: {type(e).__name__}: {str(e)[:200]}"
-        ) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/semantic-search")
@@ -632,7 +628,7 @@ async def get_memories_by_type(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory by-type unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -687,7 +683,7 @@ async def get_memories_by_category(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory by-category unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -790,7 +786,7 @@ async def get_stats_by_system(tenant_id: str = Depends(get_tenant_id)) -> dict[s
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory stats by-system unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -825,7 +821,7 @@ async def get_stats_by_type(tenant_id: str = Depends(get_tenant_id)) -> dict[str
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory stats by-type unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -898,7 +894,7 @@ async def get_memory(memory_id: str, tenant_id: str = Depends(get_tenant_id)) ->
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory by-id unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -942,7 +938,7 @@ async def delete_memory(memory_id: str, tenant_id: str = Depends(get_tenant_id))
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory delete unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -1136,7 +1132,7 @@ async def backfill_embeddings(
         raise
     except Exception as e:
         logger.error(f"Embedding backfill failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/force-sync")
@@ -1171,4 +1167,4 @@ async def force_sync_embedded_memory(request: Request):
 
     except Exception as e:
         logger.error(f"Force sync failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

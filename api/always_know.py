@@ -195,7 +195,8 @@ async def trigger_ui_tests() -> dict[str, Any]:
             "message": "UI tests started in background. Check /always-know/state for results."
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/metrics/prometheus", response_class=PlainTextResponse)
@@ -316,7 +317,8 @@ async def run_chatgpt_agent_test(
     except ImportError:
         raise HTTPException(status_code=503, detail="ChatGPT Agent Tester not available (Playwright not installed)") from None
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/chatgpt-agent-test/{run_id}")

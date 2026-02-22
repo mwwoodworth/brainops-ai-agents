@@ -167,7 +167,7 @@ async def list_entries(
 
     except Exception as e:
         logger.error(f"List entries error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/entries")
@@ -219,7 +219,7 @@ async def create_entry(request: KnowledgeEntryRequest, api_key: str = Depends(ve
 
     except Exception as e:
         logger.error(f"Knowledge entry creation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/entries/{entry_id}")
@@ -251,7 +251,7 @@ async def get_entry(
         raise
     except Exception as e:
         logger.error(f"Get entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.put("/entries/{entry_id}")
@@ -306,7 +306,7 @@ async def update_entry(
         raise
     except Exception as e:
         logger.error(f"Update entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.delete("/entries/{entry_id}")
@@ -334,7 +334,7 @@ async def delete_entry(
         raise
     except Exception as e:
         logger.error(f"Delete entry error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/search")
@@ -391,7 +391,7 @@ async def search_knowledge(request: KnowledgeSearchRequest, api_key: str = Depen
 
     except Exception as e:
         logger.error(f"Search error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/agent/query")
@@ -423,7 +423,7 @@ async def agent_query(request: AgentQueryRequest, api_key: str = Depends(verify_
 
     except Exception as e:
         logger.error(f"Agent query error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/categories")
@@ -453,7 +453,7 @@ async def list_categories(tenant_id: str = "default", api_key: str = Depends(ver
 
     except Exception as e:
         logger.error(f"List categories error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/statistics")
@@ -470,7 +470,7 @@ async def get_statistics(tenant_id: str = "default", api_key: str = Depends(veri
 
     except Exception as e:
         logger.error(f"Statistics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 #

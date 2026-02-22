@@ -205,7 +205,7 @@ async def get_revenue_status():
         }
     except Exception as e:
         logger.error(f"Revenue status error: {e}")
-        raise HTTPException(status_code=500, detail=f"Revenue system status error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/prompt-optimizer/status")
@@ -238,7 +238,7 @@ async def capture_lead(request: LeadCaptureRequest, api_key: str = Depends(verif
         return result
     except Exception as e:
         logger.error(f"Lead capture error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/leads")
@@ -282,7 +282,7 @@ async def list_leads(
         return {"leads": leads, "total": len(leads)}
     except Exception as e:
         logger.error(f"List leads error: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list leads: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/leads/{lead_id}")
@@ -318,7 +318,7 @@ async def get_lead(lead_id: str):
         raise
     except Exception as e:
         logger.error(f"Get lead error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/leads/{lead_id}/qualify")
@@ -332,7 +332,7 @@ async def qualify_lead(
         return result
     except Exception as e:
         logger.error(f"Qualify lead error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/leads/{lead_id}/payment-link")
@@ -351,7 +351,7 @@ async def create_payment_link(
         return result
     except Exception as e:
         logger.error(f"Payment link error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/webhooks/stripe")
@@ -363,7 +363,7 @@ async def stripe_webhook(payload: dict[str, Any]):
         return result
     except Exception as e:
         logger.error(f"Webhook error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/metrics")
@@ -374,7 +374,7 @@ async def get_metrics():
         return engine.get_revenue_metrics()
     except Exception as e:
         logger.error(f"Metrics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/pipeline")
@@ -385,7 +385,7 @@ async def get_pipeline():
         return engine.get_pipeline_dashboard()
     except Exception as e:
         logger.error(f"Pipeline error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/dashboard")
@@ -416,4 +416,4 @@ async def get_revenue_dashboard():
         }
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
-        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")

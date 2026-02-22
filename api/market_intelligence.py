@@ -127,7 +127,7 @@ async def ingest_signal(request: MarketSignalRequest):
         return {"status": "ingested", "result": result}
     except Exception as e:
         logger.error(f"Failed to ingest signal: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/signals")
@@ -244,7 +244,7 @@ async def optimize_content(request: ContentOptimizationRequest):
         }
     except Exception as e:
         logger.error(f"Failed to optimize content: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/content/optimizations")

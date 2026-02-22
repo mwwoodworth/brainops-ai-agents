@@ -280,7 +280,7 @@ async def get_by_category(category: str, limit: int = Query(100, ge=1, le=500)):
         raise HTTPException(status_code=504, detail="Database query timed out")
     except Exception as e:
         logger.error(f"Failed to get category: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/get/{key}", response_model=dict[str, Any])
@@ -306,7 +306,7 @@ async def get_context(
         raise
     except Exception as e:
         logger.error(f"Failed to get context: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/store", response_model=dict[str, str])
@@ -333,7 +333,7 @@ async def store_context(entry: BrainEntry):
         return {"id": entry_id, "key": entry.key, "status": "stored"}
     except Exception as e:
         logger.error(f"Failed to store context: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/search", response_model=list[dict[str, Any]])
@@ -351,7 +351,7 @@ async def search_context(query: BrainQuery):
         ]
     except Exception as e:
         logger.error(f"Failed to search: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 class RecallQuery(BaseModel):
@@ -393,7 +393,8 @@ async def recall_memory(query: RecallQuery):
     try:
         memory = get_memory_manager()
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Memory Manager not initialized: {e}")
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable")
 
     # Resolve optional memory type filter
     mem_type = None
@@ -477,7 +478,7 @@ async def recall_memory(query: RecallQuery):
         }
     except Exception as e:
         logger.error(f"Memory recall failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/session", response_model=dict[str, str])
@@ -493,7 +494,7 @@ async def record_session(
         return {"session_id": session_id, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record session: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/deployment", response_model=dict[str, str])
@@ -512,7 +513,7 @@ async def record_deployment(
         return {"service": service, "version": version, "status": "recorded"}
     except Exception as e:
         logger.error(f"Failed to record deployment: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/system-state", response_model=dict[str, str])
@@ -526,7 +527,7 @@ async def update_system_state(component: str = Body(...), state: dict[str, Any] 
         return {"component": component, "status": "updated"}
     except Exception as e:
         logger.error(f"Failed to update system state: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/health", response_model=dict[str, Any])
@@ -550,7 +551,7 @@ async def get_statistics():
         return stats
     except Exception as e:
         logger.error(f"Failed to get statistics: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/similar/{key}", response_model=list[dict[str, Any]])
@@ -566,7 +567,7 @@ async def find_similar(
         return [_sanitize_entry(item) for item in await brain.find_similar(key, limit)]
     except Exception as e:
         logger.error(f"Failed to find similar entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/related/{key}", response_model=list[dict[str, Any]])
@@ -582,7 +583,7 @@ async def get_related(
         return [_sanitize_entry(item) for item in await brain.get_related_entries(key, max_depth)]
     except Exception as e:
         logger.error(f"Failed to get related entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/cleanup-expired", response_model=dict[str, Any])
@@ -596,7 +597,7 @@ async def cleanup_expired():
         return {"status": "ok", "deleted_count": count, "timestamp": datetime.utcnow().isoformat()}
     except Exception as e:
         logger.error(f"Failed to cleanup expired entries: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/add-reference", response_model=dict[str, str])
@@ -622,7 +623,7 @@ async def add_reference(
         }
     except Exception as e:
         logger.error(f"Failed to add reference: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/operational-truth", response_model=dict[str, Any])
@@ -724,7 +725,7 @@ async def get_operational_truth():
         }
     except Exception as e:
         logger.error(f"Failed to get operational truth: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -804,7 +805,7 @@ async def brain_decide(
 
     except Exception as e:
         logger.error(f"Brain decision failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/learn")
@@ -868,4 +869,4 @@ async def brain_learn(
 
     except Exception as e:
         logger.error(f"Brain learning failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

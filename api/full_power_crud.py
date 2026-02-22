@@ -243,7 +243,7 @@ async def create_lead_v2(
             now,
         )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Lead create failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
     return _lead_row_to_response(row)
 

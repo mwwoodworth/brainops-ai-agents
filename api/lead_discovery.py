@@ -215,7 +215,7 @@ async def discover_leads(request: DiscoverLeadsRequest):
 
     except Exception as e:
         logger.error("Lead discovery failed: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/discover/erp-only")
@@ -272,7 +272,7 @@ async def discover_erp_leads(
 
     except Exception as e:
         logger.error("ERP lead discovery failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/discover/web-search")
@@ -306,7 +306,7 @@ async def discover_web_leads(
 
     except Exception as e:
         logger.error("Web lead discovery failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ====================
@@ -362,7 +362,7 @@ async def qualify_lead(request: QualifyLeadRequest):
 
     except Exception as e:
         logger.error("Lead qualification failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.put("/qualify/criteria")
@@ -410,7 +410,7 @@ async def update_qualification_criteria(request: QualificationCriteriaRequest):
 
     except Exception as e:
         logger.error("Criteria update failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/qualify/criteria")
@@ -435,7 +435,7 @@ async def get_qualification_criteria():
 
     except Exception as e:
         logger.error("Failed to get criteria: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ====================
@@ -487,7 +487,7 @@ async def sync_lead_to_erp(
 
     except Exception as e:
         logger.error("ERP sync failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/sync/revenue")
@@ -537,7 +537,7 @@ async def sync_lead_to_revenue(
 
     except Exception as e:
         logger.error("Revenue sync failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/sync/batch")
@@ -598,7 +598,7 @@ async def sync_discovered_leads(tenant_id: Optional[str] = None, limit: int = 50
 
     except Exception as e:
         logger.error("Batch sync failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ====================
@@ -626,7 +626,7 @@ async def get_discovery_stats():
 
     except Exception as e:
         logger.error("Failed to get stats: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/sources")

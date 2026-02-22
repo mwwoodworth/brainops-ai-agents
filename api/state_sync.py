@@ -15,6 +15,7 @@ Version: 1.0.0
 """
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,8 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/state-sync", tags=["state-sync"])
 
@@ -38,28 +41,29 @@ else:
 
 # ============== HEALTH & STATUS ==============
 
+
 @router.get("/health")
 async def get_system_health():
     """Get overall system health summary"""
     try:
         from realtime_state_sync import get_state_sync
+
         sync = get_state_sync()
         return sync.compute_health_summary()
     except Exception as e:
-        return {
-            "status": "unknown",
-            "error": str(e),
-            "message": "State sync not initialized"
-        }
+        return {"status": "unknown", "error": str(e), "message": "State sync not initialized"}
 
 
 @router.get("/components")
 async def get_all_components(
-    component_type: Optional[str] = Query(None, description="Filter by type: codebase, agent, database_table, api_endpoint")
+    component_type: Optional[str] = Query(
+        None, description="Filter by type: codebase, agent, database_table, api_endpoint"
+    ),
 ):
     """Get all tracked components"""
     try:
         from realtime_state_sync import get_state_sync
+
         sync = get_state_sync()
         components = sync.get_all_components(component_type)
         return {
@@ -72,13 +76,14 @@ async def get_all_components(
                     "path": c.path,
                     "last_updated": c.last_updated,
                     "version": c.version,
-                    "metadata": c.metadata
+                    "metadata": c.metadata,
                 }
                 for c in components
-            ]
+            ],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/components/{component_name}")
@@ -86,6 +91,7 @@ async def get_component(component_name: str):
     """Get a specific component by name"""
     try:
         from realtime_state_sync import get_state_sync
+
         sync = get_state_sync()
         component = sync.get_component(component_name)
 
@@ -100,15 +106,17 @@ async def get_component(component_name: str):
             "last_updated": component.last_updated,
             "version": component.version,
             "dependencies": component.dependencies,
-            "metadata": component.metadata
+            "metadata": component.metadata,
         }
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============== CHANGE HISTORY ==============
+
 
 @router.get("/changes")
 async def get_change_history(limit: int = 50):
@@ -124,10 +132,11 @@ async def get_change_history(limit: int = 50):
         return {
             "total": len(changes),
             "showing": min(limit, len(changes)),
-            "changes": changes[-limit:][::-1]
+            "changes": changes[-limit:][::-1],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/changes/by-codebase/{codebase}")
@@ -146,28 +155,32 @@ async def get_changes_by_codebase(codebase: str, limit: int = 20):
             "codebase": codebase,
             "total": len(filtered),
             "showing": min(limit, len(filtered)),
-            "changes": filtered[-limit:][::-1]
+            "changes": filtered[-limit:][::-1],
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============== FULL SCAN ==============
+
 
 @router.post("/scan")
 async def trigger_full_scan():
     """Trigger a full system scan"""
     try:
         from realtime_state_sync import get_state_sync
+
         sync = get_state_sync()
         result = await sync.full_system_scan()
         return {
             "status": "complete",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "results": result
+            "results": result,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/propagate")
@@ -175,6 +188,7 @@ async def trigger_change_propagation():
     """Trigger change detection and propagation"""
     try:
         from change_propagation_daemon import ChangePropagator
+
         propagator = ChangePropagator()
         result = await propagator.run_propagation_cycle()
         return {
@@ -182,27 +196,28 @@ async def trigger_change_propagation():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "changes_detected": result["changes"],
             "successful": result.get("successful", 0),
-            "failed": result.get("failed", 0)
+            "failed": result.get("failed", 0),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============== AI CONTEXT ==============
+
 
 @router.get("/context")
 async def get_ai_context():
     """Get formatted context for AI sessions"""
     try:
         from realtime_state_sync import get_state_sync
+
         sync = get_state_sync()
         context = sync.export_for_ai_context()
-        return {
-            "context": context,
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
+        return {"context": context, "timestamp": datetime.now(timezone.utc).isoformat()}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/context/raw", response_class=JSONResponse)
@@ -215,16 +230,19 @@ async def get_raw_state():
         with open(_STATE_PATH) as f:
             return json.load(f)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============== GIT STATUS ==============
+
 
 @router.get("/git-status")
 async def get_git_status():
     """Get git status across all codebases"""
     try:
         from change_propagation_daemon import detect_git_changes
+
         changes = await detect_git_changes()
 
         # Group by codebase
@@ -238,19 +256,18 @@ async def get_git_status():
         return {
             "total_uncommitted": len(changes),
             "by_codebase": {
-                codebase: {
-                    "count": len(files),
-                    "files": files
-                }
+                codebase: {"count": len(files), "files": files}
                 for codebase, files in by_codebase.items()
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # ============== VISUALIZATION ==============
+
 
 @router.get("/visualize", response_class=HTMLResponse)
 async def visualize_system_state():

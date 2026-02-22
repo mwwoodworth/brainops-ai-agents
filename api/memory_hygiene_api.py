@@ -48,7 +48,7 @@ async def run_full_hygiene() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Hygiene run failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/degrade-stale")
@@ -67,7 +67,7 @@ async def degrade_stale_verifications() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to degrade stale verifications: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/detect-conflicts")
@@ -86,7 +86,7 @@ async def detect_conflicts() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to detect conflicts: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/deduplicate")
@@ -105,7 +105,7 @@ async def deduplicate_memories() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to deduplicate memories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/apply-decay")
@@ -124,7 +124,7 @@ async def apply_confidence_decay() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to apply confidence decay: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/mark-superseded")
@@ -143,7 +143,7 @@ async def mark_superseded_items() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to mark superseded items: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/create-reverification-tasks")
@@ -162,7 +162,7 @@ async def create_reverification_tasks() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to create re-verification tasks: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/clean-expired")
@@ -181,7 +181,7 @@ async def clean_expired_memories() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to clean expired memories: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -204,7 +204,7 @@ async def get_backlog_stats() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to get backlog stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health")
@@ -281,7 +281,7 @@ async def get_hygiene_health() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to get hygiene health: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def _get_health_recommendations(health: dict, conflict_count: int) -> list[str]:

@@ -25,6 +25,7 @@ def _get_engine():
     if _engine is None:
         try:
             from enhanced_self_healing import EnhancedSelfHealing
+
             _engine = EnhancedSelfHealing()
         except Exception as e:
             logger.error(f"Failed to initialize Self-Healing Engine: {e}")
@@ -63,23 +64,23 @@ async def get_self_healing_status():
     """Get Self-Healing system status"""
     engine = _get_engine()
     # CRITICAL FIX: Initialize on status check to ensure system is always ready
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
     return {
         "system": "enhanced_self_healing",
         "status": "operational",
-        "initialized": engine._initialized if hasattr(engine, '_initialized') else True,
-        "active_incidents": len(engine.incidents) if hasattr(engine, 'incidents') else 0,
+        "initialized": engine._initialized if hasattr(engine, "_initialized") else True,
+        "active_incidents": len(engine.incidents) if hasattr(engine, "incidents") else 0,
         "capabilities": [
             "anomaly_detection",
             "auto_remediation",
             "predictive_healing",
             "pattern_learning",
             "tiered_autonomy",
-            "root_cause_analysis"
+            "root_cause_analysis",
         ],
         "recovery_improvement": "67% faster mean time to recovery",
-        "autonomy_model": "tiered (routine=auto, complex=human oversight)"
+        "autonomy_model": "tiered (routine=auto, complex=human oversight)",
     }
 
 
@@ -87,13 +88,11 @@ async def get_self_healing_status():
 async def detect_anomaly(request: AnomalyDetectionRequest):
     """Detect anomalies in system metrics and create incidents if needed"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     result = await engine.detect_anomaly(
-        system_id=request.system_id,
-        metrics=request.metrics,
-        context=request.context or {}
+        system_id=request.system_id, metrics=request.metrics, context=request.context or {}
     )
     return result
 
@@ -103,18 +102,15 @@ async def list_incidents(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     system_id: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=500)
+    limit: int = Query(50, ge=1, le=500),
 ):
     """List self-healing incidents"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     incidents = await engine.get_incidents(
-        status=status,
-        severity=severity,
-        system_id=system_id,
-        limit=limit
+        status=status, severity=severity, system_id=system_id, limit=limit
     )
     return {"incidents": incidents, "total": len(incidents)}
 
@@ -123,10 +119,10 @@ async def list_incidents(
 async def get_active_incidents():
     """Get all active (unresolved) incidents"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
-    active = await engine.get_active_incidents() if hasattr(engine, 'get_active_incidents') else []
+    active = await engine.get_active_incidents() if hasattr(engine, "get_active_incidents") else []
     return {
         "active_incidents": active,
         "total": len(active),
@@ -134,8 +130,8 @@ async def get_active_incidents():
             "critical": sum(1 for i in active if i.get("severity") == "critical"),
             "high": sum(1 for i in active if i.get("severity") == "high"),
             "medium": sum(1 for i in active if i.get("severity") == "medium"),
-            "low": sum(1 for i in active if i.get("severity") == "low")
-        }
+            "low": sum(1 for i in active if i.get("severity") == "low"),
+        },
     }
 
 
@@ -143,7 +139,7 @@ async def get_active_incidents():
 async def get_incident(incident_id: str):
     """Get details of a specific incident"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     incident = await engine.get_incident(incident_id)
@@ -156,12 +152,14 @@ async def get_incident(incident_id: str):
 async def get_remediation_plan(incident_id: str):
     """Get the remediation plan for an incident"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     plan = await engine.get_remediation_plan(incident_id)
     if not plan:
-        raise HTTPException(status_code=404, detail=f"No remediation plan for incident {incident_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No remediation plan for incident {incident_id}"
+        )
     return plan
 
 
@@ -169,14 +167,14 @@ async def get_remediation_plan(incident_id: str):
 async def approve_remediation(incident_id: str, request: RemediationApprovalRequest):
     """Approve or reject a remediation plan (for complex issues requiring human oversight)"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     result = await engine.process_approval(
         incident_id=incident_id,
         approved=request.approved,
         approver=request.approver,
-        notes=request.notes
+        notes=request.notes,
     )
     return result
 
@@ -185,14 +183,14 @@ async def approve_remediation(incident_id: str, request: RemediationApprovalRequ
 async def execute_manual_remediation(incident_id: str, request: ManualRemediationRequest):
     """Manually execute a remediation action"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     result = await engine.execute_manual_remediation(
         incident_id=incident_id,
         action=request.action,
         parameters=request.parameters or {},
-        executor=request.executor
+        executor=request.executor,
     )
     return result
 
@@ -201,13 +199,13 @@ async def execute_manual_remediation(incident_id: str, request: ManualRemediatio
 async def record_health_pattern(request: HealthPatternRequest):
     """Record a health pattern for machine learning"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     result = await engine.record_pattern(
         system_id=request.system_id,
         pattern_type=request.pattern_type,
-        metrics_snapshot=request.metrics_snapshot
+        metrics_snapshot=request.metrics_snapshot,
     )
     return result
 
@@ -216,7 +214,7 @@ async def record_health_pattern(request: HealthPatternRequest):
 async def get_system_patterns(system_id: str):
     """Get learned health patterns for a system"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     patterns = await engine.get_patterns(system_id)
@@ -228,50 +226,58 @@ async def get_self_healing_metrics():
     """Get self-healing performance metrics"""
     try:
         engine = _get_engine()
-        if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+        if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
             await engine.initialize()
 
         # Try to get metrics from the engine (it's a sync method, not async)
         metrics = {}
-        if hasattr(engine, 'get_metrics'):
+        if hasattr(engine, "get_metrics"):
             metrics = engine.get_metrics()  # Not awaited - it's a sync method
-        elif hasattr(engine, 'total_incidents'):
+        elif hasattr(engine, "total_incidents"):
             metrics = {
                 "total_incidents": engine.total_incidents,
-                "auto_resolved": engine.auto_resolved_incidents if hasattr(engine, 'auto_resolved_incidents') else 0,
-                "avg_recovery_time_seconds": engine.avg_recovery_time_seconds if hasattr(engine, 'avg_recovery_time_seconds') else 0
+                "auto_resolved": engine.auto_resolved_incidents
+                if hasattr(engine, "auto_resolved_incidents")
+                else 0,
+                "avg_recovery_time_seconds": engine.avg_recovery_time_seconds
+                if hasattr(engine, "avg_recovery_time_seconds")
+                else 0,
             }
 
         return {
             "metrics": metrics,
             "performance": {
                 "mttr_improvement": "67%",
-                "auto_remediation_rate": metrics.get("auto_resolution_rate", metrics.get("auto_remediation_rate", 0)),
-                "successful_remediations": metrics.get("auto_resolved", metrics.get("successful_remediations", 0)),
+                "auto_remediation_rate": metrics.get(
+                    "auto_resolution_rate", metrics.get("auto_remediation_rate", 0)
+                ),
+                "successful_remediations": metrics.get(
+                    "auto_resolved", metrics.get("successful_remediations", 0)
+                ),
                 "failed_remediations": metrics.get("failed_remediations", 0),
-                "avg_resolution_time_seconds": metrics.get("avg_recovery_time_seconds", metrics.get("avg_resolution_time", 0))
-            }
+                "avg_resolution_time_seconds": metrics.get(
+                    "avg_recovery_time_seconds", metrics.get("avg_resolution_time", 0)
+                ),
+            },
         }
     except Exception as e:
         logger.error(f"Error getting self-healing metrics: {e}")
-        raise HTTPException(status_code=500, detail=f"Metrics error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/remediations")
 async def list_remediations(
     status: Optional[str] = None,
     system_id: Optional[str] = None,
-    limit: int = Query(50, ge=1, le=500)
+    limit: int = Query(50, ge=1, le=500),
 ):
     """List remediation history"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     remediations = await engine.get_remediation_history(
-        status=status,
-        system_id=system_id,
-        limit=limit
+        status=status, system_id=system_id, limit=limit
     )
     return {"remediations": remediations}
 
@@ -280,28 +286,28 @@ async def list_remediations(
 async def get_root_cause_analysis(incident_id: str):
     """Get root cause analysis for an incident"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     analysis = await engine.analyze_root_cause(incident_id)
     if not analysis:
-        raise HTTPException(status_code=404, detail=f"No root cause analysis for incident {incident_id}")
+        raise HTTPException(
+            status_code=404, detail=f"No root cause analysis for incident {incident_id}"
+        )
     return analysis
 
 
 @router.get("/predictions")
 async def get_failure_predictions(
-    system_id: Optional[str] = None,
-    min_probability: float = Query(0.5, ge=0, le=1)
+    system_id: Optional[str] = None, min_probability: float = Query(0.5, ge=0, le=1)
 ):
     """Get predicted failures before they occur"""
     engine = _get_engine()
-    if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+    if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
         await engine.initialize()
 
     predictions = await engine.get_failure_predictions(
-        system_id=system_id,
-        min_probability=min_probability
+        system_id=system_id, min_probability=min_probability
     )
     return {"predictions": predictions}
 
@@ -311,7 +317,7 @@ async def get_self_healing_dashboard():
     """Get a comprehensive self-healing dashboard"""
     try:
         engine = _get_engine()
-        if hasattr(engine, 'initialize') and not getattr(engine, '_initialized', True):
+        if hasattr(engine, "initialize") and not getattr(engine, "_initialized", True):
             await engine.initialize()
 
         # Try to get active incidents from the module's standalone function
@@ -319,12 +325,14 @@ async def get_self_healing_dashboard():
         metrics = {}
         try:
             from enhanced_self_healing import get_active_incidents as get_incidents_func
+
             active_incidents = await get_incidents_func()
         except Exception as e:
             logger.warning(f"Could not get active incidents: {e}")
 
         try:
             from enhanced_self_healing import get_self_healing_metrics as get_metrics_func
+
             metrics = await get_metrics_func()
         except Exception as e:
             logger.warning(f"Could not get metrics: {e}")
@@ -332,32 +340,72 @@ async def get_self_healing_dashboard():
         return {
             "overview": {
                 "active_incidents": len(active_incidents) if active_incidents else 0,
-                "pending_approvals": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("requires_approval")) if active_incidents else 0,
-                "auto_remediating": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("auto_remediating")) if active_incidents else 0,
-                "mttr_improvement": "67%"
+                "pending_approvals": sum(
+                    1
+                    for i in active_incidents
+                    if isinstance(i, dict) and i.get("requires_approval")
+                )
+                if active_incidents
+                else 0,
+                "auto_remediating": sum(
+                    1 for i in active_incidents if isinstance(i, dict) and i.get("auto_remediating")
+                )
+                if active_incidents
+                else 0,
+                "mttr_improvement": "67%",
             },
             "incidents_by_severity": {
-                "critical": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "critical") if active_incidents else 0,
-                "high": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "high") if active_incidents else 0,
-                "medium": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "medium") if active_incidents else 0,
-                "low": sum(1 for i in active_incidents if isinstance(i, dict) and i.get("severity") == "low") if active_incidents else 0
+                "critical": sum(
+                    1
+                    for i in active_incidents
+                    if isinstance(i, dict) and i.get("severity") == "critical"
+                )
+                if active_incidents
+                else 0,
+                "high": sum(
+                    1
+                    for i in active_incidents
+                    if isinstance(i, dict) and i.get("severity") == "high"
+                )
+                if active_incidents
+                else 0,
+                "medium": sum(
+                    1
+                    for i in active_incidents
+                    if isinstance(i, dict) and i.get("severity") == "medium"
+                )
+                if active_incidents
+                else 0,
+                "low": sum(
+                    1
+                    for i in active_incidents
+                    if isinstance(i, dict) and i.get("severity") == "low"
+                )
+                if active_incidents
+                else 0,
             },
             "metrics": {
-                "total_incidents_24h": metrics.get("incidents_24h", 0) if isinstance(metrics, dict) else 0,
-                "auto_remediated_24h": metrics.get("auto_remediated_24h", 0) if isinstance(metrics, dict) else 0,
-                "avg_resolution_seconds": metrics.get("avg_resolution_time", 0) if isinstance(metrics, dict) else 0,
-                "success_rate": metrics.get("success_rate", 0) if isinstance(metrics, dict) else 0
+                "total_incidents_24h": metrics.get("incidents_24h", 0)
+                if isinstance(metrics, dict)
+                else 0,
+                "auto_remediated_24h": metrics.get("auto_remediated_24h", 0)
+                if isinstance(metrics, dict)
+                else 0,
+                "avg_resolution_seconds": metrics.get("avg_resolution_time", 0)
+                if isinstance(metrics, dict)
+                else 0,
+                "success_rate": metrics.get("success_rate", 0) if isinstance(metrics, dict) else 0,
             },
             "autonomy_tiers": {
                 "tier_1_auto": "Routine issues (restarts, cache clears, scaling)",
                 "tier_2_supervised": "Complex issues (database, credentials, failover)",
-                "tier_3_manual": "Critical issues (data integrity, security, architecture)"
+                "tier_3_manual": "Critical issues (data integrity, security, architecture)",
             },
-            "recent_incidents": active_incidents[:10] if active_incidents else []
+            "recent_incidents": active_incidents[:10] if active_incidents else [],
         }
     except Exception as e:
         logger.error(f"Error in self-healing dashboard: {e}")
-        raise HTTPException(status_code=500, detail=f"Dashboard error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -373,6 +421,7 @@ def _get_mcp_healer():
     if _mcp_healer is None:
         try:
             from mcp_integration import get_self_healing_integration
+
             _mcp_healer = get_self_healing_integration()
         except Exception as e:
             logger.error(f"Failed to initialize MCP Self-Healing: {e}")
@@ -409,7 +458,7 @@ async def mcp_heal_service(request: MCPHealRequest):
         return result
     except Exception as e:
         logger.error(f"MCP heal error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/mcp/services")
@@ -424,12 +473,13 @@ async def mcp_list_services():
         if result.success:
             return {"success": True, "services": result.result}
         else:
-            raise HTTPException(status_code=502, detail=f"MCP Error: {result.error}")
+            logger.error("MCP operation failed: %s", result.error)
+            raise HTTPException(status_code=502, detail="Bad gateway")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"MCP list services error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/mcp/logs/{service_name}")
@@ -450,15 +500,16 @@ async def mcp_get_service_logs(service_name: str, lines: int = 100):
                 "success": result.success,
                 "service": service_name,
                 "logs": result.result,
-                "error": result.error
+                "error": result.error,
             }
         else:
-            raise HTTPException(status_code=502, detail=f"MCP Error: {result.error}")
+            logger.error("MCP operation failed: %s", result.error)
+            raise HTTPException(status_code=502, detail="Bad gateway")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"MCP get logs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/mcp/restart/{service_name}")
@@ -480,15 +531,16 @@ async def mcp_restart_service(service_name: str):
                 "service": service_name,
                 "action": "restart",
                 "result": result.result,
-                "error": result.error
+                "error": result.error,
             }
         else:
-            raise HTTPException(status_code=502, detail=f"MCP Restart Failed: {result.error}")
+            logger.error("MCP restart failed: %s", result.error)
+            raise HTTPException(status_code=502, detail="Bad gateway")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"MCP restart error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/mcp/scale/{service_name}")
@@ -511,12 +563,13 @@ async def mcp_scale_service(service_name: str, instances: int = 2):
                 "action": "scale",
                 "instances": instances,
                 "result": result.result,
-                "error": result.error
+                "error": result.error,
             }
         else:
-            raise HTTPException(status_code=502, detail=f"MCP Scale Failed: {result.error}")
+            logger.error("MCP scale failed: %s", result.error)
+            raise HTTPException(status_code=502, detail="Bad gateway")
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"MCP scale error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

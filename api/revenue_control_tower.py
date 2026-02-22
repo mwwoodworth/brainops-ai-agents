@@ -326,7 +326,7 @@ async def get_ground_truth(
 
     except Exception as e:
         logger.error(f"Ground truth query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def _generate_diagnosis(leads: dict, gumroad: dict, total_revenue: float) -> dict[str, Any]:
@@ -459,7 +459,7 @@ async def get_lead_inbox(
 
     except Exception as e:
         logger.error(f"Lead inbox query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================
@@ -592,7 +592,7 @@ async def set_control(
 
     except Exception as e:
         logger.error(f"Failed to set control: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 # =============================================================================

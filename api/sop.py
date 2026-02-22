@@ -200,7 +200,7 @@ async def generate_sop(
 
     except Exception as e:
         logger.error(f"SOP generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/generate-from-process")
@@ -230,7 +230,7 @@ async def generate_sop_from_process(
 
     except Exception as e:
         logger.error(f"Process mining SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/{sop_id}")
@@ -256,7 +256,7 @@ async def get_sop(sop_id: str, tenant_id: str = "default", api_key: str = Depend
         raise
     except Exception as e:
         logger.error(f"Get SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/{sop_id}/status")
@@ -280,7 +280,7 @@ async def get_sop_status(
         raise
     except Exception as e:
         logger.error(f"Get status error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.put("/{sop_id}")
@@ -320,7 +320,7 @@ async def update_sop(
         raise
     except Exception as e:
         logger.error(f"Update SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/{sop_id}/approve")
@@ -368,7 +368,7 @@ async def approve_sop(
         raise
     except Exception as e:
         logger.error(f"Approve SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/{sop_id}/publish")
@@ -405,7 +405,7 @@ async def publish_sop(
         raise
     except Exception as e:
         logger.error(f"Publish SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/{sop_id}/export/{format}")
@@ -462,7 +462,7 @@ async def export_sop(
         raise
     except Exception as e:
         logger.error(f"Export SOP error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/list")
@@ -494,7 +494,7 @@ async def list_sops(
 
     except Exception as e:
         logger.error(f"List SOPs error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/types")

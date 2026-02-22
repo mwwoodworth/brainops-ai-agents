@@ -79,10 +79,10 @@ async def get_entity_relationships(entity_id: str, tenant_id: str = Depends(get_
             entity_id,
         )
     except DatabaseUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except Exception as exc:
         logger.error("Failed to fetch relationships: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
     return {"entity_id": entity_id, "relationships": [dict(row) for row in rows]}
 
@@ -109,10 +109,10 @@ async def get_relationship_path(
             tenant_id,
         )
     except DatabaseUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except Exception as exc:
         logger.error("Failed to load relationships: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
 
     adjacency: dict[str, list[tuple[str, str]]] = {}
     for edge in edges:

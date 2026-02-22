@@ -146,7 +146,7 @@ async def restart_stuck_executions():
         }
     except Exception as e:
         logger.error("Failed to restart stuck executions: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/scheduler/activate-all")
@@ -210,7 +210,7 @@ async def activate_all_agents_scheduler():
 
     except Exception as e:
         logger.error(f"Failed to activate all agents: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/agents/schedule")
@@ -260,4 +260,4 @@ async def schedule_agent(
         raise
     except Exception as e:
         logger.error(f"Failed to schedule agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

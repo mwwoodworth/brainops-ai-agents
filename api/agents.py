@@ -192,7 +192,7 @@ async def run_product_agent(request: ProductRequest):
         }
     except Exception as e:
         logger.error(f"Product Agent Failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/agents", response_model=AgentList)
@@ -305,7 +305,7 @@ async def get_agents(
                 )
             except DatabaseUnavailableError as exc:
                 logger.error("Database unavailable while loading agents", exc_info=True)
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
+                raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
             except Exception as e:
                 logger.error(f"Failed to get agents from database: {e}", exc_info=True)
                 raise HTTPException(status_code=500, detail="Failed to load agents") from e
@@ -500,7 +500,8 @@ async def execute_agent(agent_id: str, request: Request, authenticated: bool = T
                 }
             )
 
-        raise HTTPException(status_code=500, detail=f"Execution failed: {str(e)}") from e
+        logger.error("Internal server error: %s", fail_error)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/agents/status")
@@ -539,7 +540,8 @@ async def get_all_agents_status():
                 "timestamp": datetime.utcnow().isoformat(),
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e)) from e
+            logger.error("Internal server error: %s", e)
+            raise HTTPException(status_code=500, detail="Internal server error") from e
 
     try:
         from agent_health_monitor import get_health_monitor
@@ -578,7 +580,7 @@ async def get_all_agents_status():
         }
     except Exception as e:
         logger.error(f"Error getting agent status: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/agents/{agent_id}")
@@ -601,7 +603,7 @@ async def get_agent(agent_id: str) -> Agent:
         raise
     except Exception as e:
         logger.error(f"Failed to get agent: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve agent: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/agents/{agent_id}/history")
@@ -662,7 +664,7 @@ async def get_agent_history(
         raise
     except DatabaseUnavailableError as exc:
         logger.error("Database unavailable while loading agent history", exc_info=True)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except Exception as e:
         logger.error("Failed to get agent history: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to retrieve agent history") from e
@@ -866,7 +868,7 @@ async def check_agents_health():
         return result
     except Exception as e:
         logger.error(f"Health check failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/agents/{agent_id}/restart")
@@ -894,7 +896,7 @@ async def restart_agent(agent_id: str):
         raise
     except Exception as e:
         logger.error(f"Failed to restart agent: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/agents/health/auto-restart")
@@ -911,7 +913,7 @@ async def auto_restart_critical_agents():
         return result
     except Exception as e:
         logger.error(f"Auto-restart failed: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/agents/execute")
@@ -1046,7 +1048,8 @@ async def execute_agent_generic(
             str(e),
             execution_id,
         )
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/ai/tasks/execute/{task_id}")
@@ -1072,7 +1075,7 @@ async def execute_ai_task(task_id: str):
         raise
     except Exception as e:
         logger.error(f"Task execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/api/v1/agents/execute")
@@ -1250,4 +1253,4 @@ async def execute_aurea_event(
         raise
     except Exception as e:
         logger.error(f"AUREA Event {request.event_id} failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Event execution failed: {str(e)}") from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

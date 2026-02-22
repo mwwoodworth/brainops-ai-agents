@@ -178,7 +178,7 @@ async def register_affiliate(
 
     except Exception as e:
         logger.error(f"Affiliate registration error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/track/click")
@@ -207,7 +207,7 @@ async def track_click(request: ClickTrackRequest, api_key: str = Depends(verify_
 
     except Exception as e:
         logger.error(f"Click tracking error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/track/conversion")
@@ -242,7 +242,7 @@ async def track_conversion(request: ConversionRequest, api_key: str = Depends(ve
 
     except Exception as e:
         logger.error(f"Conversion tracking error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/dashboard/{affiliate_id}")
@@ -266,7 +266,7 @@ async def get_affiliate_dashboard(
         raise
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/stats/{affiliate_id}")
@@ -288,7 +288,7 @@ async def get_affiliate_stats(
 
     except Exception as e:
         logger.error(f"Stats error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/content/{affiliate_id}/generate")
@@ -321,7 +321,7 @@ async def generate_affiliate_content(
 
     except Exception as e:
         logger.error(f"Content generation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/commissions/pending")
@@ -344,7 +344,7 @@ async def get_pending_commissions(
 
     except Exception as e:
         logger.error(f"Pending commissions error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/payouts/process")
@@ -374,7 +374,7 @@ async def process_payouts(
 
     except Exception as e:
         logger.error(f"Payout processing error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/leaderboard")
@@ -400,4 +400,4 @@ async def get_affiliate_leaderboard(
 
     except Exception as e:
         logger.error(f"Leaderboard error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

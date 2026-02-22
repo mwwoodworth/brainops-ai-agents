@@ -159,7 +159,7 @@ async def execute_tool(request: ExecuteToolRequest):
         }
     except Exception as e:
         logger.error(f"MCP execute error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -341,7 +341,7 @@ async def aurea_execute_decision(request: AUREADecisionRequest):
         return result
     except Exception as e:
         logger.error(f"AUREA execute error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -370,7 +370,7 @@ async def self_heal_service(request: SelfHealRequest):
         return result
     except Exception as e:
         logger.error(f"Self-heal error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -420,7 +420,7 @@ async def revenue_action(request: RevenueActionRequest):
         raise
     except Exception as e:
         logger.error(f"Revenue action error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -455,7 +455,7 @@ async def sync_digital_twin(request: TwinSyncRequest):
 
     except Exception as e:
         logger.error(f"Twin sync error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================

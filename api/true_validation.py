@@ -25,7 +25,7 @@ async def run_true_validation():
         return await run_true_validation()
     except Exception as e:
         logger.error(f"Validation failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/status")

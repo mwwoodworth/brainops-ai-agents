@@ -312,7 +312,8 @@ async def readiness_check(request: Request):
         pool = get_pool()
         db_healthy = await pool.test_connection()
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Database not ready: {exc}")
+        logger.error("Database readiness check failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Database not ready")
 
     if not db_healthy:
         raise HTTPException(status_code=503, detail="Database not ready")
@@ -515,4 +516,5 @@ async def get_system_alerts(request: Request, limit: int = 50, unresolved_only: 
 
         return {"count": len(alerts), "alerts": [dict(a) for a in alerts]}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error")

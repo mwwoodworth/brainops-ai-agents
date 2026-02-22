@@ -601,7 +601,7 @@ async def create_schedule(config: ScheduledTestConfig) -> dict[str, Any]:
         }
     except Exception as e:
         logger.error(f"Failed to create schedule: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/schedules")

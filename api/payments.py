@@ -33,6 +33,7 @@ PAYMENTS_CONTACT_EMAIL = (
 
 class MarkPaidRequest(BaseModel):
     """Request to mark an invoice as paid."""
+
     payment_method: str = "manual"
     payment_reference: Optional[str] = None
     verified_by: str
@@ -40,6 +41,7 @@ class MarkPaidRequest(BaseModel):
 
 class CapturePaymentRequest(BaseModel):
     """Capture full or partial payment for an invoice."""
+
     amount: Optional[float] = None
     payment_method: str = "manual"
     payment_reference: Optional[str] = None
@@ -48,14 +50,14 @@ class CapturePaymentRequest(BaseModel):
 
 class PaymentPlanRequest(BaseModel):
     """Configure installment rules for an invoice."""
+
     installment_count: int
     interval_days: int = 30
     min_installment_amount: Optional[float] = None
     configured_by: str = "system"
 
 
-@router.on_event("startup")
-async def startup():
+async def payments_startup():
     """Ensure invoices table exists on startup."""
     await ensure_invoices_table()
 
@@ -95,8 +97,7 @@ async def get_payment_status() -> dict[str, Any]:
 
 @router.post("/invoice/from-proposal/{proposal_id}")
 async def create_invoice_from_proposal(
-    proposal_id: str,
-    due_days: int = Query(default=14, ge=7, le=90)
+    proposal_id: str, due_days: int = Query(default=14, ge=7, le=90)
 ) -> dict[str, Any]:
     """
     Create an invoice from an approved/sent proposal.
@@ -120,7 +121,7 @@ async def create_invoice_from_proposal(
         "payment_link": invoice.payment_link,
         "stripe_checkout": bool(invoice.stripe_checkout_id),
         "due_date": invoice.due_date.isoformat(),
-        "next_step": f"POST /payments/invoice/{invoice.id}/send to send to client"
+        "next_step": f"POST /payments/invoice/{invoice.id}/send to send to client",
     }
 
 
@@ -143,15 +144,12 @@ async def send_invoice(invoice_id: str) -> dict[str, Any]:
         "message": message,
         "invoice_id": invoice_id,
         "status": "sent",
-        "note": "Email queued. Lead state updated to INVOICED."
+        "note": "Email queued. Lead state updated to INVOICED.",
     }
 
 
 @router.post("/invoice/{invoice_id}/mark-paid")
-async def mark_invoice_paid(
-    invoice_id: str,
-    request: MarkPaidRequest
-) -> dict[str, Any]:
+async def mark_invoice_paid(invoice_id: str, request: MarkPaidRequest) -> dict[str, Any]:
     """
     Manually mark an invoice as paid.
 
@@ -164,7 +162,7 @@ async def mark_invoice_paid(
         amount=None,
         payment_method=request.payment_method,
         payment_reference=request.payment_reference,
-        verified_by=request.verified_by
+        verified_by=request.verified_by,
     )
 
     if not success:
@@ -175,7 +173,7 @@ async def mark_invoice_paid(
         "message": message,
         "invoice_id": invoice_id,
         "status": "paid",
-        "note": "REAL REVENUE CAPTURED. Lead state updated to PAID."
+        "note": "REAL REVENUE CAPTURED. Lead state updated to PAID.",
     }
 
 
@@ -257,12 +255,15 @@ async def get_invoice(invoice_id: str) -> dict[str, Any]:
     if not pool:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    invoice = await pool.fetchrow("""
+    invoice = await pool.fetchrow(
+        """
         SELECT i.*, p.offer_name, p.client_company
         FROM ai_invoices i
         JOIN ai_proposals p ON i.proposal_id = p.id
         WHERE i.id = $1
-    """, uuid.UUID(invoice_id))
+    """,
+        uuid.UUID(invoice_id),
+    )
 
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -281,8 +282,8 @@ async def get_invoice(invoice_id: str) -> dict[str, Any]:
             "payment_link": invoice["payment_link"],
             "due_date": invoice["due_date"].isoformat() if invoice["due_date"] else None,
             "paid_at": invoice["paid_at"].isoformat() if invoice.get("paid_at") else None,
-            "created_at": invoice["created_at"].isoformat() if invoice["created_at"] else None
-        }
+            "created_at": invoice["created_at"].isoformat() if invoice["created_at"] else None,
+        },
     }
 
 
@@ -295,13 +296,15 @@ async def get_pending_invoices() -> dict[str, Any]:
     if not pool:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    rows = await pool.fetch("""
+    rows = await pool.fetch(
+        """
         SELECT i.id, i.amount, i.status, i.due_date, p.offer_name, p.client_company
         FROM ai_invoices i
         JOIN ai_proposals p ON i.proposal_id = p.id
         WHERE i.status IN ('pending', 'sent')
         ORDER BY i.due_date ASC
-    """)
+    """
+    )
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -314,10 +317,10 @@ async def get_pending_invoices() -> dict[str, Any]:
                 "client_company": r["client_company"],
                 "amount": float(r["amount"]),
                 "status": r["status"],
-                "due_date": r["due_date"].isoformat() if r["due_date"] else None
+                "due_date": r["due_date"].isoformat() if r["due_date"] else None,
             }
             for r in rows
-        ]
+        ],
     }
 
 
@@ -334,7 +337,7 @@ async def get_real_revenue() -> dict[str, Any]:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **summary,
-        "note": "Revenue only from PAID invoices linked to REAL leads"
+        "note": "Revenue only from PAID invoices linked to REAL leads",
     }
 
 
@@ -346,7 +349,7 @@ async def payment_success(invoice_id: str) -> dict[str, Any]:
         "success": True,
         "message": "Payment successful! Thank you.",
         "invoice_id": invoice_id,
-        "note": "Payment confirmation will be processed via webhook."
+        "note": "Payment confirmation will be processed via webhook.",
     }
 
 
@@ -357,7 +360,7 @@ async def payment_cancelled(invoice_id: str) -> dict[str, Any]:
         "cancelled": True,
         "message": "Payment was cancelled.",
         "invoice_id": invoice_id,
-        "note": "You can try again using the payment link in your email."
+        "note": "You can try again using the payment link in your email.",
     }
 
 
@@ -375,12 +378,15 @@ async def manual_payment_page(invoice_id: str) -> dict[str, Any]:
     if not pool:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    invoice = await pool.fetchrow("""
+    invoice = await pool.fetchrow(
+        """
         SELECT i.*, p.offer_name, p.client_company
         FROM ai_invoices i
         JOIN ai_proposals p ON i.proposal_id = p.id
         WHERE i.id = $1
-    """, uuid.UUID(invoice_id))
+    """,
+        uuid.UUID(invoice_id),
+    )
 
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -396,16 +402,13 @@ async def manual_payment_page(invoice_id: str) -> dict[str, Any]:
         "payment_instructions": {
             "method_1": {
                 "name": "Bank Transfer",
-                "details": f"Contact {PAYMENTS_CONTACT_EMAIL} for wire transfer instructions"
+                "details": f"Contact {PAYMENTS_CONTACT_EMAIL} for wire transfer instructions",
             },
             "method_2": {
                 "name": "PayPal",
-                "details": f"Send to {PAYMENTS_CONTACT_EMAIL} with invoice ID in notes"
+                "details": f"Send to {PAYMENTS_CONTACT_EMAIL} with invoice ID in notes",
             },
-            "method_3": {
-                "name": "Crypto",
-                "details": "Contact for BTC/ETH address"
-            }
+            "method_3": {"name": "Crypto", "details": "Contact for BTC/ETH address"},
         },
-        "note": "After payment, your invoice will be marked as paid within 24 hours."
+        "note": "After payment, your invoice will be marked as paid within 24 hours.",
     }

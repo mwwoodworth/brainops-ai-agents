@@ -143,7 +143,7 @@ async def get_agent_results(
             return results
     except Exception as e:
         logger.error(f"Failed to get agent results: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/healing/history", response_model=List[HealingAction])
@@ -231,7 +231,7 @@ async def get_healing_history(
 
     except Exception as e:
         logger.error(f"Failed to get healing history: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/problems/active", response_model=List[ActiveProblem])

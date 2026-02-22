@@ -168,7 +168,7 @@ async def execute_prediction(request: PredictionRequest):
 
     except Exception as e:
         logger.error(f"Prediction execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/execute-batch")
@@ -199,7 +199,7 @@ async def execute_batch_predictions(request: BatchPredictionRequest):
 
     except Exception as e:
         logger.error(f"Batch execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/evaluate")
@@ -229,7 +229,7 @@ async def evaluate_prediction(request: PredictionRequest):
 
     except Exception as e:
         logger.error(f"Prediction evaluation error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/stats", response_model=StatsResponse)
@@ -250,7 +250,7 @@ async def get_execution_stats():
 
     except Exception as e:
         logger.error(f"Stats retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/recent")
@@ -273,7 +273,7 @@ async def get_recent_executions(
 
     except Exception as e:
         logger.error(f"Recent executions retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/learn")
@@ -310,7 +310,7 @@ async def record_accuracy_feedback(request: AccuracyFeedbackRequest):
 
     except Exception as e:
         logger.error(f"Feedback recording error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/from-ooda")
@@ -348,7 +348,7 @@ async def execute_ooda_speculations(request: OODASpeculationsRequest):
 
     except Exception as e:
         logger.error(f"OODA speculation execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/from-proactive")
@@ -389,7 +389,7 @@ async def execute_proactive_recommendations(request: ProactiveRecommendationsReq
 
     except Exception as e:
         logger.error(f"Proactive recommendation execution error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/config")
@@ -414,7 +414,7 @@ async def get_executor_config():
 
     except Exception as e:
         logger.error(f"Config retrieval error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/health")

@@ -729,7 +729,7 @@ async def preview_migration(
 
     except Exception as e:
         logger.error(f"Preview failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/migrate")
@@ -887,4 +887,4 @@ async def migrate_single_table(
 
     except Exception as e:
         logger.error(f"Migration of {table_name} failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

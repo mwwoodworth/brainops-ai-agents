@@ -198,7 +198,7 @@ async def send_estimate(request: SendEstimateRequest) -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to queue estimate email: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send estimate: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get("/status/{email_id}")
@@ -239,4 +239,4 @@ async def get_email_status(email_id: str) -> dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Failed to get email status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")

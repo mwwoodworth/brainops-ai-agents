@@ -7,6 +7,7 @@ Predict labor hours/productivity using a lightweight RandomForest model trained 
 
 from __future__ import annotations
 
+import logging
 import pickle
 import uuid
 from datetime import datetime, timezone
@@ -101,13 +102,17 @@ async def get_status() -> dict[str, Any]:
     return {
         "system": "roofing_labor_ml",
         "status": "operational",
-        "samples": dict(sample_counts) if sample_counts else {"total": 0, "synthetic": 0, "real": 0},
+        "samples": dict(sample_counts)
+        if sample_counts
+        else {"total": 0, "synthetic": 0, "real": 0},
         "latest_model": {
             "id": latest.get("id"),
             "version": latest.get("model_version"),
             "training_data_count": latest.get("training_data_count"),
             "r2": latest.get("accuracy"),
-            "created_at": latest.get("created_at").isoformat() if latest and latest.get("created_at") else None,
+            "created_at": latest.get("created_at").isoformat()
+            if latest and latest.get("created_at")
+            else None,
         }
         if latest
         else None,
@@ -224,7 +229,13 @@ async def train_model(
         "type": MODEL_TYPE,
         "trained_at": datetime.now(timezone.utc).isoformat(),
         "feature_names": feature_names,
-        "metrics": {"r2": r2, "mae": mae, "rmse": rmse, "samples": len(samples), "features": X.shape[1]},
+        "metrics": {
+            "r2": r2,
+            "mae": mae,
+            "rmse": rmse,
+            "samples": len(samples),
+            "features": X.shape[1],
+        },
         "vectorizer": vec,
         "model": model,
     }
@@ -274,14 +285,18 @@ async def train_model(
 async def predict(payload: LaborPredictIn) -> dict[str, Any]:
     latest = await _get_latest_model_row()
     if not latest:
-        raise HTTPException(status_code=404, detail="No trained model available; run POST /roofing/labor-ml/train first")
+        raise HTTPException(
+            status_code=404,
+            detail="No trained model available; run POST /roofing/labor-ml/train first",
+        )
 
     try:
         model_package = pickle.loads(latest["model_data"])
         vec = model_package["vectorizer"]
         model = model_package["model"]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load model: {e}") from e
+        logger.error("Internal server error: %s", e)
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
     import numpy as np
 

@@ -441,7 +441,7 @@ async def get_system_status(request: Request):
         )
     except Exception as e:
         logger.error(f"Error getting system status: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/scheduler/status")
@@ -518,7 +518,7 @@ async def activate_agent(request: AgentActivationRequest, background_tasks: Back
             raise HTTPException(status_code=400, detail="Either agent_name or event_type must be provided")
     except Exception as e:
         logger.error(f"Failed to activate agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/agents/categories")
@@ -542,7 +542,7 @@ async def get_agent_categories():
         }
     except Exception as e:
         logger.error(f"Failed to get agent categories: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/events/trigger")
@@ -570,7 +570,7 @@ async def trigger_business_event(request: BusinessEventRequest, background_tasks
         raise HTTPException(status_code=400, detail=f"Invalid event type: {request.event_type}") from None
     except Exception as e:
         logger.error(f"Failed to trigger event: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/ai/tasks/execute")
@@ -650,7 +650,7 @@ async def query_memory_get(request: Request, query: Optional[str] = None, limit:
         }
     except Exception as e:
         logger.error(f"Memory query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/memory/query")
@@ -684,7 +684,7 @@ async def query_memory(request: Request, query_request: MemoryQueryRequest):
         }
     except Exception as e:
         logger.error(f"Memory query failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/memory/synthesize")
@@ -706,7 +706,7 @@ async def synthesize_insights(request: Request):
         }
     except Exception as e:
         logger.error(f"Synthesis failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/memory/store")
@@ -742,7 +742,7 @@ async def store_memory(request: Request, memory_data: dict[str, Any]):
         return {"success": True, "memory_id": memory_id}
     except Exception as e:
         logger.error(f"Memory store failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/memory/recall")
@@ -777,7 +777,7 @@ async def recall_memory(
         return {"memories": memories, "count": len(memories)}
     except Exception as e:
         logger.error(f"Memory recall failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.get("/aurea/status")
@@ -815,7 +815,7 @@ async def set_autonomy_level(request: AutonomyRequest):
         }
     except Exception as e:
         logger.error(f"Failed to set autonomy: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/aurea/start")
@@ -872,7 +872,7 @@ async def get_board_members():
         return {"members": members, "count": len(members)}
     except Exception as e:
         logger.error(f"Failed to get board members: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/board/proposal")
@@ -906,7 +906,7 @@ async def submit_board_proposal(request: ProposalRequest):
         }
     except Exception as e:
         logger.error(f"Failed to submit proposal: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @app.post("/board/meeting")
@@ -968,7 +968,7 @@ async def execute_agent_legacy(agent_id: str, request: dict[str, Any], req: Requ
         }
     except Exception as e:
         logger.error(f"Agent execution failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # Special endpoints for Weathercraft ERP support

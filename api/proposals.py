@@ -28,6 +28,7 @@ router = APIRouter(prefix="/proposals", tags=["Proposal Engine"])
 
 class DraftProposalRequest(BaseModel):
     """Request to create a draft proposal."""
+
     lead_id: str
     offer_id: str
     custom_notes: Optional[str] = None
@@ -36,11 +37,11 @@ class DraftProposalRequest(BaseModel):
 
 class ApproveProposalRequest(BaseModel):
     """Request to approve a proposal."""
+
     approved_by: str
 
 
-@router.on_event("startup")
-async def startup():
+async def proposals_startup():
     """Ensure proposals table exists on startup."""
     await ensure_proposals_table()
 
@@ -55,10 +56,7 @@ async def get_offers() -> dict[str, Any]:
     # Convert Decimal to float for JSON serialization
     offers = {}
     for offer_id, offer in OFFER_CATALOG.items():
-        offers[offer_id] = {
-            **offer,
-            "price": float(offer["price"])
-        }
+        offers[offer_id] = {**offer, "price": float(offer["price"])}
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -67,8 +65,8 @@ async def get_offers() -> dict[str, Any]:
         "categories": {
             "MyRoofGenius": ["mrg_starter", "mrg_pro"],
             "BrainOps AI OS": ["brainops_automation", "brainops_starter"],
-            "Weathercraft ERP": ["erp_implementation", "erp_subscription"]
-        }
+            "Weathercraft ERP": ["erp_implementation", "erp_subscription"],
+        },
     }
 
 
@@ -85,7 +83,7 @@ async def draft_proposal(request: DraftProposalRequest) -> dict[str, Any]:
         lead_id=request.lead_id,
         offer_id=request.offer_id,
         custom_notes=request.custom_notes,
-        discount_percent=request.discount_percent
+        discount_percent=request.discount_percent,
     )
 
     if not success:
@@ -98,7 +96,7 @@ async def draft_proposal(request: DraftProposalRequest) -> dict[str, Any]:
         "status": proposal.status.value,
         "offer_name": proposal.offer_name,
         "final_price": float(proposal.final_price) if proposal.final_price else None,
-        "next_step": f"POST /proposals/{proposal.id}/submit-approval to request approval"
+        "next_step": f"POST /proposals/{proposal.id}/submit-approval to request approval",
     }
 
 
@@ -121,15 +119,12 @@ async def submit_for_approval(proposal_id: str) -> dict[str, Any]:
         "message": message,
         "proposal_id": proposal_id,
         "status": "pending_approval",
-        "next_step": f"POST /proposals/{proposal_id}/approve to approve the proposal"
+        "next_step": f"POST /proposals/{proposal_id}/approve to approve the proposal",
     }
 
 
 @router.post("/{proposal_id}/approve")
-async def approve_proposal(
-    proposal_id: str,
-    request: ApproveProposalRequest
-) -> dict[str, Any]:
+async def approve_proposal(proposal_id: str, request: ApproveProposalRequest) -> dict[str, Any]:
     """
     Approve a proposal (human-in-the-loop).
 
@@ -138,8 +133,7 @@ async def approve_proposal(
     engine = get_proposal_engine()
 
     success, message = await engine.approve_proposal(
-        proposal_id=proposal_id,
-        approved_by=request.approved_by
+        proposal_id=proposal_id, approved_by=request.approved_by
     )
 
     if not success:
@@ -151,7 +145,7 @@ async def approve_proposal(
         "proposal_id": proposal_id,
         "status": "approved",
         "approved_by": request.approved_by,
-        "next_step": f"POST /proposals/{proposal_id}/send to send to client"
+        "next_step": f"POST /proposals/{proposal_id}/send to send to client",
     }
 
 
@@ -175,7 +169,7 @@ async def send_proposal(proposal_id: str) -> dict[str, Any]:
         "proposal_id": proposal_id,
         "status": "sent",
         "public_link": public_link,
-        "note": "Email queued for delivery. Lead state updated to PROPOSAL_SENT."
+        "note": "Email queued for delivery. Lead state updated to PROPOSAL_SENT.",
     }
 
 
@@ -193,7 +187,9 @@ async def get_proposal(proposal_id: str) -> dict[str, Any]:
     if proposal.get("client_email"):
         email = proposal["client_email"]
         parts = email.split("@")
-        proposal["client_email_masked"] = f"{parts[0][:3]}***@{parts[1]}" if len(parts) == 2 else "***"
+        proposal["client_email_masked"] = (
+            f"{parts[0][:3]}***@{parts[1]}" if len(parts) == 2 else "***"
+        )
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -208,8 +204,8 @@ async def get_proposal(proposal_id: str) -> dict[str, Any]:
             "client_email_masked": proposal.get("client_email_masked"),
             "created_at": proposal["created_at"].isoformat() if proposal["created_at"] else None,
             "sent_at": proposal["sent_at"].isoformat() if proposal.get("sent_at") else None,
-            "public_link": proposal.get("public_link")
-        }
+            "public_link": proposal.get("public_link"),
+        },
     }
 
 
@@ -230,10 +226,10 @@ async def get_proposals_for_lead(lead_id: str) -> dict[str, Any]:
                 "status": p["status"],
                 "offer_name": p["offer_name"],
                 "final_price": float(p["final_price"]) if p["final_price"] else None,
-                "created_at": p["created_at"].isoformat() if p["created_at"] else None
+                "created_at": p["created_at"].isoformat() if p["created_at"] else None,
             }
             for p in proposals
-        ]
+        ],
     }
 
 
@@ -246,12 +242,14 @@ async def get_pending_proposals() -> dict[str, Any]:
     if not pool:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    rows = await pool.fetch("""
+    rows = await pool.fetch(
+        """
         SELECT id, lead_id, offer_name, client_company, final_price, created_at
         FROM ai_proposals
         WHERE status = 'pending_approval'
         ORDER BY created_at ASC
-    """)
+    """
+    )
 
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -263,8 +261,8 @@ async def get_pending_proposals() -> dict[str, Any]:
                 "offer_name": r["offer_name"],
                 "client_company": r["client_company"],
                 "final_price": float(r["final_price"]) if r["final_price"] else None,
-                "created_at": r["created_at"].isoformat() if r["created_at"] else None
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             }
             for r in rows
-        ]
+        ],
     }

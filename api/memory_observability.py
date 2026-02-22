@@ -292,12 +292,12 @@ async def get_memory_stats(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory stats unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get memory stats: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -404,7 +404,7 @@ async def get_memory_health(
 
     except DatabaseUnavailableError as exc:
         logger.error("Memory health unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
@@ -495,12 +495,12 @@ async def get_hot_memories(
 
     except DatabaseUnavailableError as exc:
         logger.error("Hot memories unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get hot memories: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -584,12 +584,12 @@ async def get_cold_memories(
 
     except DatabaseUnavailableError as exc:
         logger.error("Cold memories unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get cold memories: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -721,12 +721,12 @@ async def get_decay_metrics(
 
     except DatabaseUnavailableError as exc:
         logger.error("Decay metrics unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get decay metrics: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 def _get_decay_recommendations(decay_candidates: int, age_buckets: list, importance_dist: list) -> list[str]:
@@ -845,12 +845,12 @@ async def get_consolidation_metrics(
 
     except DatabaseUnavailableError as exc:
         logger.error("Consolidation metrics unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get consolidation metrics: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -952,12 +952,12 @@ async def get_storage_metrics(
 
     except DatabaseUnavailableError as exc:
         logger.error("Storage metrics unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get storage metrics: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -1057,12 +1057,12 @@ async def get_query_performance(
 
     except DatabaseUnavailableError as exc:
         logger.error("Performance metrics unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get performance metrics: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 # =============================================================================
@@ -1111,9 +1111,9 @@ async def get_memory_dashboard(
 
     except DatabaseUnavailableError as exc:
         logger.error("Dashboard unavailable: %s", exc)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Service temporarily unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error("Failed to get dashboard: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

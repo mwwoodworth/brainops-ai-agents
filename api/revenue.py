@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Security
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, root_validator
+from pydantic import BaseModel, model_validator
 
 # API Key Security - use centralized config
 from config import config
@@ -19,23 +19,24 @@ from database.async_connection import DatabaseUnavailableError, get_pool
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
 VALID_API_KEYS = config.security.valid_api_keys
 
+
 async def verify_api_key(api_key: str = Security(API_KEY_HEADER)) -> str:
     """Verify API key for authentication"""
     if not api_key or api_key not in VALID_API_KEYS:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
     return api_key
 
+
 # All endpoints require API key authentication
 router = APIRouter(
-    prefix="/api/v1/revenue",
-    tags=["revenue"],
-    dependencies=[Depends(verify_api_key)]
+    prefix="/api/v1/revenue", tags=["revenue"], dependencies=[Depends(verify_api_key)]
 )
 logger = logging.getLogger(__name__)
 
 
 class LeadDiscoveryRequest(BaseModel):
     """Request for lead discovery"""
+
     industry: str = "roofing"
     location: Optional[str] = "USA"
     limit: int = 10
@@ -45,6 +46,7 @@ class LeadDiscoveryRequest(BaseModel):
 
 class LeadCreateRequest(BaseModel):
     """Request to create a lead"""
+
     name: str
     email: str
     phone: Optional[str] = None
@@ -69,7 +71,8 @@ class LeadCreateRequest(BaseModel):
     tenant_id: Optional[str] = None
     value_estimate: float = 5000.0
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def normalize_legacy_fields(cls, values: dict[str, Any]) -> dict[str, Any]:
         if "name" not in values and values.get("contact_name"):
             values["name"] = values["contact_name"]
@@ -81,14 +84,17 @@ class LeadCreateRequest(BaseModel):
             values["company_name"] = values["company"]
         return values
 
+
 class LeadQualifyRequest(BaseModel):
     """Request to qualify a lead"""
+
     lead_id: str
     notes: Optional[str] = None
 
 
 class ProposalRequest(BaseModel):
     """Request to generate proposal"""
+
     lead_id: str
     service_type: str = "roofing_software"
     pricing_tier: str = "standard"
@@ -96,6 +102,7 @@ class ProposalRequest(BaseModel):
 
 class PromptOptimizerCompileRequest(BaseModel):
     """Request to (re)compile the revenue prompt optimizer."""
+
     force: bool = True
 
 
@@ -106,48 +113,56 @@ async def get_revenue_status():
 
     try:
         # Get lead counts by stage
-        stages = await pool.fetch("""
+        stages = await pool.fetch(
+            """
             SELECT stage, COUNT(*) as count
             FROM revenue_leads
             GROUP BY stage
-        """)
+        """
+        )
 
         # Get total revenue potential
-        totals = await pool.fetchrow("""
+        totals = await pool.fetchrow(
+            """
             SELECT
                 COUNT(*) as total_leads,
                 COALESCE(SUM(value_estimate), 0) as total_pipeline_value,
                 COUNT(*) FILTER (WHERE stage = 'won') as won_deals,
                 COALESCE(SUM(value_estimate) FILTER (WHERE stage = 'won'), 0) as won_revenue
             FROM revenue_leads
-        """)
+        """
+        )
 
         # Get recent actions
-        recent_actions = await pool.fetchval("""
+        recent_actions = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM revenue_actions
             WHERE created_at > NOW() - INTERVAL '24 hours'
-        """)
+        """
+        )
 
         # Get opportunity count
-        opportunities = await pool.fetchval("""
+        opportunities = await pool.fetchval(
+            """
             SELECT COUNT(*) FROM revenue_opportunities
-        """)
+        """
+        )
 
         return {
             "success": True,
             "status": "operational",
-            "leads_by_stage": {row['stage']: row['count'] for row in stages},
-            "total_leads": totals['total_leads'] or 0,
-            "pipeline_value": float(totals['total_pipeline_value'] or 0),
-            "won_deals": totals['won_deals'] or 0,
-            "won_revenue": float(totals['won_revenue'] or 0),
+            "leads_by_stage": {row["stage"]: row["count"] for row in stages},
+            "total_leads": totals["total_leads"] or 0,
+            "pipeline_value": float(totals["total_pipeline_value"] or 0),
+            "won_deals": totals["won_deals"] or 0,
+            "won_revenue": float(totals["won_revenue"] or 0),
             "opportunities": opportunities or 0,
             "actions_24h": recent_actions or 0,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
         logger.error(f"Error getting revenue status: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/prompt-optimizer/status")
@@ -195,13 +210,16 @@ async def discover_leads(request: LeadDiscoveryRequest):
     try:
         # Generate leads using configured sources. Tenant_id is required for ERP data access.
         # SECURITY: Pass tenant_id for proper tenant isolation
-        leads_data = await generate_realistic_leads(request.industry, request.location, request.limit, request.tenant_id)
+        leads_data = await generate_realistic_leads(
+            request.industry, request.location, request.limit, request.tenant_id
+        )
 
         created_leads = []
         for lead_data in leads_data:
             lead_id = str(uuid.uuid4())
 
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO revenue_leads (
                     id, company_name, contact_name, email, phone, website,
                     stage, score, value_estimate, source, metadata, created_at
@@ -209,48 +227,52 @@ async def discover_leads(request: LeadDiscoveryRequest):
                 ON CONFLICT DO NOTHING
             """,
                 uuid.UUID(lead_id),
-                lead_data['company_name'],
-                lead_data['contact_name'],
-                lead_data['email'],
-                lead_data.get('phone'),
-                lead_data.get('website'),
-                'new',
-                lead_data.get('score', 0.5),
-                lead_data.get('value_estimate', 5000.0),
+                lead_data["company_name"],
+                lead_data["contact_name"],
+                lead_data["email"],
+                lead_data.get("phone"),
+                lead_data.get("website"),
+                "new",
+                lead_data.get("score", 0.5),
+                lead_data.get("value_estimate", 5000.0),
                 request.source,
-                json.dumps(lead_data.get('metadata', {}))
+                json.dumps(lead_data.get("metadata", {})),
             )
 
-            created_leads.append({
-                "id": lead_id,
-                **lead_data
-            })
+            created_leads.append({"id": lead_id, **lead_data})
 
             # Log the action
-            await pool.execute("""
+            await pool.execute(
+                """
                 INSERT INTO revenue_actions (lead_id, action_type, action_data, success, executed_by)
                 VALUES ($1, $2, $3, TRUE, 'ai_discovery_agent')
-            """, uuid.UUID(lead_id), 'identify_lead', json.dumps({
-                "source": request.source,
-                "industry": request.industry,
-                "location": request.location
-            }))
+            """,
+                uuid.UUID(lead_id),
+                "identify_lead",
+                json.dumps(
+                    {
+                        "source": request.source,
+                        "industry": request.industry,
+                        "location": request.location,
+                    }
+                ),
+            )
 
         return {
             "success": True,
             "leads_created": len(created_leads),
             "leads": created_leads,
-            "message": f"Generated {len(created_leads)} new leads from discovery pipeline"
+            "message": f"Generated {len(created_leads)} new leads from discovery pipeline",
         }
 
     except DatabaseUnavailableError as exc:
         logger.error("Database unavailable during lead discovery", exc_info=True)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error discovering leads: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/create-lead")
@@ -276,7 +298,8 @@ async def create_lead(request: LeadCreateRequest):
             "tenant_id": request.tenant_id,
         }
 
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO revenue_leads (
                 id, company_name, contact_name, email, phone, website,
                 stage, score, value_estimate, source, metadata, created_at
@@ -292,51 +315,48 @@ async def create_lead(request: LeadCreateRequest):
             request.score,
             request.value_estimate,
             request.source,
-            json.dumps({k: v for k, v in metadata.items() if v is not None})
+            json.dumps({k: v for k, v in metadata.items() if v is not None}),
         )
 
-        return {
-            "success": True,
-            "lead_id": lead_id,
-            "message": "Lead created successfully"
-        }
+        return {"success": True, "lead_id": lead_id, "message": "Lead created successfully"}
     except Exception as e:
         logger.error(f"Error creating lead: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/leads")
-async def get_leads(
-    stage: Optional[str] = None,
-    limit: int = Query(50, le=200),
-    offset: int = 0
-):
+async def get_leads(stage: Optional[str] = None, limit: int = Query(50, le=200), offset: int = 0):
     """Get all leads with optional filtering"""
     pool = get_pool()
 
     try:
         if stage:
-            leads = await pool.fetch("""
+            leads = await pool.fetch(
+                """
                 SELECT * FROM revenue_leads
                 WHERE stage = $1
                 ORDER BY created_at DESC
                 LIMIT $2 OFFSET $3
-            """, stage, limit, offset)
+            """,
+                stage,
+                limit,
+                offset,
+            )
         else:
-            leads = await pool.fetch("""
+            leads = await pool.fetch(
+                """
                 SELECT * FROM revenue_leads
                 ORDER BY created_at DESC
                 LIMIT $1 OFFSET $2
-            """, limit, offset)
+            """,
+                limit,
+                offset,
+            )
 
-        return {
-            "success": True,
-            "leads": [dict(row) for row in leads],
-            "count": len(leads)
-        }
+        return {"success": True, "leads": [dict(row) for row in leads], "count": len(leads)}
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/qualify/{lead_id}")
@@ -346,32 +366,35 @@ async def qualify_lead(lead_id: str, request: LeadQualifyRequest):
 
     try:
         # Update lead stage
-        result = await pool.fetchrow("""
+        result = await pool.fetchrow(
+            """
             UPDATE revenue_leads
             SET stage = 'qualified', score = score + 0.2, updated_at = NOW()
             WHERE id = $1
             RETURNING *
-        """, uuid.UUID(lead_id))
+        """,
+            uuid.UUID(lead_id),
+        )
 
         if not result:
             raise HTTPException(status_code=404, detail="Lead not found")
 
         # Log action
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO revenue_actions (lead_id, action_type, action_data, success, executed_by)
             VALUES ($1, 'qualify_lead', $2, TRUE, 'qualification_agent')
-        """, uuid.UUID(lead_id), json.dumps({"notes": request.notes}))
+        """,
+            uuid.UUID(lead_id),
+            json.dumps({"notes": request.notes}),
+        )
 
-        return {
-            "success": True,
-            "lead": dict(result),
-            "message": "Lead qualified successfully"
-        }
+        return {"success": True, "lead": dict(result), "message": "Lead qualified successfully"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error qualifying lead: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/generate-proposal/{lead_id}")
@@ -381,9 +404,12 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
 
     try:
         # Get lead info
-        lead = await pool.fetchrow("""
+        lead = await pool.fetchrow(
+            """
             SELECT * FROM revenue_leads WHERE id = $1
-        """, uuid.UUID(lead_id))
+        """,
+            uuid.UUID(lead_id),
+        )
 
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
@@ -393,14 +419,15 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
             "starter": {"monthly": 99, "annual": 999},
             "standard": {"monthly": 299, "annual": 2999},
             "premium": {"monthly": 599, "annual": 5999},
-            "enterprise": {"monthly": 1499, "annual": 14999}
+            "enterprise": {"monthly": 1499, "annual": 14999},
         }
 
         tier_pricing = pricing.get(request.pricing_tier, pricing["standard"])
 
         # Create opportunity (using existing schema)
         opp_id = str(uuid.uuid4())
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO revenue_opportunities (
                 id, lead_id, opportunity_name, value, probability,
                 expected_close_date, stage, created_at
@@ -409,48 +436,57 @@ async def generate_proposal(lead_id: str, request: ProposalRequest):
             uuid.UUID(opp_id),
             uuid.UUID(lead_id),
             f"{lead['company_name']} - {request.service_type}",
-            tier_pricing['annual'],
+            tier_pricing["annual"],
             0.6,
             datetime.utcnow().date() + timedelta(days=30),
-            'proposal_sent'
+            "proposal_sent",
         )
 
         # Update lead stage
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE revenue_leads
             SET stage = 'proposal_sent', updated_at = NOW()
             WHERE id = $1
-        """, uuid.UUID(lead_id))
+        """,
+            uuid.UUID(lead_id),
+        )
 
         # Log action
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO revenue_actions (lead_id, action_type, action_data, success, executed_by)
             VALUES ($1, 'create_proposal', $2, TRUE, 'proposal_agent')
-        """, uuid.UUID(lead_id), json.dumps({
-            "opportunity_id": opp_id,
-            "pricing_tier": request.pricing_tier,
-            "value": tier_pricing['annual']
-        }))
+        """,
+            uuid.UUID(lead_id),
+            json.dumps(
+                {
+                    "opportunity_id": opp_id,
+                    "pricing_tier": request.pricing_tier,
+                    "value": tier_pricing["annual"],
+                }
+            ),
+        )
 
         return {
             "success": True,
             "opportunity_id": opp_id,
             "lead_id": lead_id,
             "proposal": {
-                "company": lead['company_name'],
-                "contact": lead['contact_name'],
+                "company": lead["company_name"],
+                "contact": lead["contact_name"],
                 "pricing_tier": request.pricing_tier,
-                "monthly_price": tier_pricing['monthly'],
-                "annual_price": tier_pricing['annual'],
-                "expected_close": (datetime.utcnow().date() + timedelta(days=30)).isoformat()
+                "monthly_price": tier_pricing["monthly"],
+                "annual_price": tier_pricing["annual"],
+                "expected_close": (datetime.utcnow().date() + timedelta(days=30)).isoformat(),
             },
-            "message": "Proposal generated successfully"
+            "message": "Proposal generated successfully",
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error generating proposal: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.post("/close-deal/{lead_id}")
@@ -459,44 +495,56 @@ async def close_deal(lead_id: str, won: bool = True):
     pool = get_pool()
 
     try:
-        stage = 'won' if won else 'lost'
+        stage = "won" if won else "lost"
 
         # Update lead
-        result = await pool.fetchrow("""
+        result = await pool.fetchrow(
+            """
             UPDATE revenue_leads
             SET stage = $1, updated_at = NOW()
             WHERE id = $2
             RETURNING *
-        """, stage, uuid.UUID(lead_id))
+        """,
+            stage,
+            uuid.UUID(lead_id),
+        )
 
         if not result:
             raise HTTPException(status_code=404, detail="Lead not found")
 
         # Update opportunity stage
-        await pool.execute("""
+        await pool.execute(
+            """
             UPDATE revenue_opportunities
             SET stage = $1, updated_at = NOW()
             WHERE lead_id = $2
-        """, stage, uuid.UUID(lead_id))
+        """,
+            stage,
+            uuid.UUID(lead_id),
+        )
 
         # Log action
-        await pool.execute("""
+        await pool.execute(
+            """
             INSERT INTO revenue_actions (lead_id, action_type, action_data, success, executed_by)
             VALUES ($1, 'close_deal', $2, TRUE, 'closing_agent')
-        """, uuid.UUID(lead_id), json.dumps({"won": won}))
+        """,
+            uuid.UUID(lead_id),
+            json.dumps({"won": won}),
+        )
 
         return {
             "success": True,
             "lead_id": lead_id,
             "stage": stage,
-            "value": float(result['value_estimate'] or 0) if won else 0,
-            "message": f"Deal {'won' if won else 'lost'} - {result['company_name']}"
+            "value": float(result["value_estimate"] or 0) if won else 0,
+            "message": f"Deal {'won' if won else 'lost'} - {result['company_name']}",
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error closing deal: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
 @router.get("/pipeline")
@@ -506,7 +554,8 @@ async def get_pipeline():
 
     try:
         # Get pipeline by stage with values
-        pipeline = await pool.fetch("""
+        pipeline = await pool.fetch(
+            """
             SELECT
                 stage,
                 COUNT(*) as lead_count,
@@ -524,38 +573,47 @@ async def get_pipeline():
                     WHEN 'negotiating' THEN 5
                     WHEN 'won' THEN 6
                 END
-        """)
+        """
+        )
 
         # Get recent wins
-        recent_wins = await pool.fetch("""
+        recent_wins = await pool.fetch(
+            """
             SELECT company_name, value_estimate, updated_at
             FROM revenue_leads
             WHERE stage = 'won'
             ORDER BY updated_at DESC
             LIMIT 5
-        """)
+        """
+        )
 
         return {
             "success": True,
             "pipeline": [
                 {
-                    "stage": row['stage'],
-                    "count": row['lead_count'],
-                    "value": float(row['total_value'] or 0),
-                    "avg_score": float(row['avg_score'] or 0)
+                    "stage": row["stage"],
+                    "count": row["lead_count"],
+                    "value": float(row["total_value"] or 0),
+                    "avg_score": float(row["avg_score"] or 0),
                 }
                 for row in pipeline
             ],
             "recent_wins": [dict(row) for row in recent_wins],
-            "total_pipeline_value": sum(float(row['total_value'] or 0) for row in pipeline if row['stage'] != 'won'),
-            "total_won_revenue": sum(float(row['total_value'] or 0) for row in pipeline if row['stage'] == 'won')
+            "total_pipeline_value": sum(
+                float(row["total_value"] or 0) for row in pipeline if row["stage"] != "won"
+            ),
+            "total_won_revenue": sum(
+                float(row["total_value"] or 0) for row in pipeline if row["stage"] == "won"
+            ),
         }
     except Exception as e:
         logger.error(f"Error getting pipeline: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e
 
 
-async def generate_realistic_leads(industry: str, location: str, count: int, tenant_id: Optional[str] = None) -> list[dict[str, Any]]:
+async def generate_realistic_leads(
+    industry: str, location: str, count: int, tenant_id: Optional[str] = None
+) -> list[dict[str, Any]]:
     """
     Generate/discover leads using configured lead sources and ERP data.
 
@@ -574,7 +632,8 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
         # These are customers with recent job history or high engagement
         # SECURITY: Now includes tenant_id filter to prevent cross-tenant data access
         if tenant_id:
-            erp_leads = await pool.fetch("""
+            erp_leads = await pool.fetch(
+                """
                 SELECT DISTINCT
                     c.id,
                     c.first_name || ' ' || c.last_name as contact_name,
@@ -597,39 +656,51 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
                 HAVING COUNT(j.id) = 0 OR MAX(j.created_at) < NOW() - INTERVAL '6 months'
                 ORDER BY lifetime_value DESC NULLS LAST, c.created_at DESC
                 LIMIT $2
-            """, location, count, tenant_id)
+            """,
+                location,
+                count,
+                tenant_id,
+            )
         else:
             # Without tenant_id, only query from AI-specific revenue_leads table (no ERP customer access)
-            logger.warning("generate_realistic_leads called without tenant_id - skipping ERP customer query for security")
+            logger.warning(
+                "generate_realistic_leads called without tenant_id - skipping ERP customer query for security"
+            )
             erp_leads = []
 
         for row in erp_leads:
-            leads.append({
-                "id": str(uuid.uuid4()),
-                "company_name": row["company_name"] or "Unknown",
-                "contact_name": row["contact_name"] or "Unknown",
-                "email": row["email"],
-                "phone": row.get("phone"),
-                "location": f"{row.get('city', '')}, {row.get('state', '')}".strip(", "),
-                "source": "erp_reactivation",
-                "source_detail": "Existing customer - re-engagement opportunity",
-                "value_estimate": float(row.get("lifetime_value", 0)) + 5000.0,
-                "score": 85 if row.get("lifetime_value", 0) > 0 else 70,
-                "industry": industry,
-                "discovered_at": datetime.now().isoformat(),
-                "metadata": {
-                    "customer_id": str(row["id"]),
-                    "job_count": row.get("job_count", 0),
-                    "last_job_date": row["last_job_date"].isoformat() if row.get("last_job_date") else None
+            leads.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "company_name": row["company_name"] or "Unknown",
+                    "contact_name": row["contact_name"] or "Unknown",
+                    "email": row["email"],
+                    "phone": row.get("phone"),
+                    "location": f"{row.get('city', '')}, {row.get('state', '')}".strip(", "),
+                    "source": "erp_reactivation",
+                    "source_detail": "Existing customer - re-engagement opportunity",
+                    "value_estimate": float(row.get("lifetime_value", 0)) + 5000.0,
+                    "score": 85 if row.get("lifetime_value", 0) > 0 else 70,
+                    "industry": industry,
+                    "discovered_at": datetime.now().isoformat(),
+                    "metadata": {
+                        "customer_id": str(row["id"]),
+                        "job_count": row.get("job_count", 0),
+                        "last_job_date": row["last_job_date"].isoformat()
+                        if row.get("last_job_date")
+                        else None,
+                    },
                 }
-            })
+            )
 
         # Strategy 2: Check configured lead sources (only real integrations, no placeholders)
-        sources = await pool.fetch("""
+        sources = await pool.fetch(
+            """
             SELECT id, name, source_type, config, leads_found
             FROM ai_lead_sources
             WHERE enabled = true
-        """)
+        """
+        )
 
         for source in sources:
             source_name = source["name"]
@@ -647,20 +718,25 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
 
         # Update lead source stats
         if leads:
-            await pool.execute("""
+            await pool.execute(
+                """
                 UPDATE ai_lead_sources
                 SET leads_found = leads_found + $1,
                     last_run_at = NOW(),
                     updated_at = NOW()
                 WHERE enabled = true
-            """, len([l for l in leads if l.get("source") not in ["erp_reactivation"]]))
+            """,
+                len([l for l in leads if l.get("source") not in ["erp_reactivation"]]),
+            )
 
-        logger.info(f"Lead discovery completed: found {len(leads)} leads for {industry} in {location}")
+        logger.info(
+            f"Lead discovery completed: found {len(leads)} leads for {industry} in {location}"
+        )
         return leads[:count]
 
     except DatabaseUnavailableError as exc:
         logger.error("Database unavailable during lead discovery", exc_info=True)
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail="Database unavailable") from exc
     except Exception as e:
         logger.error(f"Lead discovery error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Lead discovery failed") from e
@@ -668,6 +744,7 @@ async def generate_realistic_leads(industry: str, location: str, count: int, ten
 
 class EnrichLeadsRequest(BaseModel):
     """Request to enrich leads with contact information"""
+
     lead_ids: Optional[list[str]] = None
     max_leads: int = 10
 
@@ -683,70 +760,88 @@ async def enrich_leads(request: EnrichLeadsRequest):
     try:
         # Import Perplexity for web search
         from ai_advanced_providers import AdvancedAIProviders
+
         ai = AdvancedAIProviders()
 
         # Get leads that need enrichment
         if request.lead_ids:
-            leads = await pool.fetch("""
+            leads = await pool.fetch(
+                """
                 SELECT id, company_name, website
                 FROM revenue_leads
                 WHERE id = ANY($1::uuid[])
                 AND email IS NULL
                 AND website IS NOT NULL
-            """, [uuid.UUID(lid) for lid in request.lead_ids])
+            """,
+                [uuid.UUID(lid) for lid in request.lead_ids],
+            )
         else:
-            leads = await pool.fetch("""
+            leads = await pool.fetch(
+                """
                 SELECT id, company_name, website
                 FROM revenue_leads
                 WHERE email IS NULL
                 AND website IS NOT NULL
                 LIMIT $1
-            """, request.max_leads)
+            """,
+                request.max_leads,
+            )
 
         enriched = []
         for lead in leads:
-            website = lead['website']
-            company = lead['company_name']
+            website = lead["website"]
+            company = lead["company_name"]
 
             # Use Perplexity to find contact info
             query = f"Find the contact email address and phone number for {company}. Their website is {website}. Return ONLY the email address and phone number, nothing else."
 
             result = ai.search_with_perplexity(query)
 
-            if result and result.get('answer'):
-                answer = result['answer']
+            if result and result.get("answer"):
+                answer = result["answer"]
 
                 # Extract email from response (simple regex)
                 import re
-                email_match = re.search(r'[\w.+-]+@[\w-]+\.[\w.-]+', answer)
-                phone_match = re.search(r'[\d\-\(\)\s\.]{10,}', answer)
+
+                email_match = re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", answer)
+                phone_match = re.search(r"[\d\-\(\)\s\.]{10,}", answer)
 
                 if email_match:
                     email = email_match.group(0)
                     phone = phone_match.group(0).strip() if phone_match else None
 
                     # Check if email already exists for another lead
-                    existing = await pool.fetchval("""
+                    existing = await pool.fetchval(
+                        """
                         SELECT id FROM revenue_leads WHERE email = $1
-                    """, email)
+                    """,
+                        email,
+                    )
 
                     if existing:
                         logger.warning(f"Email {email} already exists for another lead, skipping")
                         continue
 
                     # Update the lead
-                    await pool.execute("""
+                    await pool.execute(
+                        """
                         UPDATE revenue_leads
                         SET email = $1, phone = $2, updated_at = NOW()
                         WHERE id = $3
-                    """, email, phone, lead['id'])
+                    """,
+                        email,
+                        phone,
+                        lead["id"],
+                    )
 
-                    enriched.append({
-                        "lead_id": str(lead['id']),
-                        "company_name": company,
-                        "email": email,
-                        "phone": phone
-                    })
+                    enriched.append(
+                        {
+                            "lead_id": str(lead["id"]),
+                            "company_name": company,
+                            "email": email,
+                            "phone": phone,
+                        }
+                    )
 
                     logger.info(f"Enriched lead {company}: {email}")
 
@@ -754,9 +849,9 @@ async def enrich_leads(request: EnrichLeadsRequest):
             "success": True,
             "enriched_count": len(enriched),
             "leads": enriched,
-            "message": f"Enriched {len(enriched)} of {len(leads)} leads"
+            "message": f"Enriched {len(enriched)} of {len(leads)} leads",
         }
 
     except Exception as e:
         logger.error(f"Lead enrichment error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise HTTPException(status_code=500, detail="Internal server error") from e

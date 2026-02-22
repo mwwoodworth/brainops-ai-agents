@@ -47,7 +47,7 @@ async def scale_service(request: ScaleRequest):
             return response.json()
     except Exception as e:
         logger.error(f"Infrastructure error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.post("/restart")
 async def restart_service(request: ServiceActionRequest):
@@ -76,4 +76,4 @@ async def restart_service(request: ServiceActionRequest):
             return {"status": "restart_initiated", "service_id": request.service_id}
     except Exception as e:
         logger.error(f"Infrastructure error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
