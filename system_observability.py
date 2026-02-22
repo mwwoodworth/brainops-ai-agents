@@ -21,6 +21,8 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from database.async_connection import DatabaseUnavailableError, get_pool
+
 logger = logging.getLogger(__name__)
 
 # Router for all observability endpoints
@@ -76,34 +78,26 @@ class SystemStatus(BaseModel):
     recommendations: List[str]
 
 
-# Database helper - lazy import to avoid circular dependencies
-_db_pool = None
-
-async def get_db():
-    """Get database connection pool"""
-    global _db_pool
-    if _db_pool is None:
-        try:
-            from db_config import get_pool
-            _db_pool = await get_pool()
-        except Exception as e:
-            logger.error(f"Failed to get DB pool: {e}")
-            return None
-    return _db_pool
+def _get_pool_or_none():
+    """Get the shared database pool, or None if unavailable."""
+    try:
+        return get_pool()
+    except DatabaseUnavailableError:
+        return None
 
 
 @router.get("/agents/{agent_name}/results", response_model=List[AgentResult])
 async def get_agent_results(
     agent_name: str,
     limit: int = Query(default=10, le=100),
-    include_errors: bool = Query(default=True)
+    include_errors: bool = Query(default=True),
 ):
     """
     Get actual results/outputs from a specific agent.
 
     This answers: "What did this agent actually find or produce?"
     """
-    pool = await get_db()
+    pool = _get_pool_or_none()
     if not pool:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
@@ -132,17 +126,19 @@ async def get_agent_results(
 
             results = []
             for row in rows:
-                results.append(AgentResult(
-                    agent_name=row['agent_name'],
-                    execution_id=row['execution_id'],
-                    status=row['status'],
-                    started_at=row['started_at'],
-                    completed_at=row['completed_at'],
-                    duration_ms=int(row['duration_ms']) if row['duration_ms'] else None,
-                    result_summary=row['result_summary'],
-                    result_data=row['result_data'] if row['result_data'] else None,
-                    error=row['error']
-                ))
+                results.append(
+                    AgentResult(
+                        agent_name=row["agent_name"],
+                        execution_id=row["execution_id"],
+                        status=row["status"],
+                        started_at=row["started_at"],
+                        completed_at=row["completed_at"],
+                        duration_ms=int(row["duration_ms"]) if row["duration_ms"] else None,
+                        result_summary=row["result_summary"],
+                        result_data=row["result_data"] if row["result_data"] else None,
+                        error=row["error"],
+                    )
+                )
 
             return results
     except Exception as e:
@@ -152,15 +148,14 @@ async def get_agent_results(
 
 @router.get("/healing/history", response_model=List[HealingAction])
 async def get_healing_history(
-    limit: int = Query(default=20, le=100),
-    hours: int = Query(default=24, le=168)
+    limit: int = Query(default=20, le=100), hours: int = Query(default=24, le=168)
 ):
     """
     Get history of self-healing actions taken by the system.
 
     This answers: "What has the AI OS automatically fixed?"
     """
-    pool = await get_db()
+    pool = _get_pool_or_none()
     if not pool:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
@@ -170,10 +165,10 @@ async def get_healing_history(
 
             # Check multiple possible tables for healing data
             tables_to_try = [
-                'ai_recovery_actions',
-                'self_healing_actions',
-                'ai_healing_log',
-                'ai_system_events'
+                "ai_recovery_actions",
+                "self_healing_actions",
+                "ai_healing_log",
+                "ai_system_events",
             ]
 
             for table in tables_to_try:
@@ -181,12 +176,12 @@ async def get_healing_history(
                     # Check if table exists
                     exists = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM information_schema.tables WHERE table_name = $1)",
-                        table
+                        table,
                     )
                     if not exists:
                         continue
 
-                    if table == 'ai_recovery_actions':
+                    if table == "ai_recovery_actions":
                         query = """
                             SELECT
                                 id::text,
@@ -206,7 +201,7 @@ async def get_healing_history(
                         if rows:
                             return [HealingAction(**dict(row)) for row in rows]
 
-                    elif table == 'ai_system_events':
+                    elif table == "ai_system_events":
                         query = """
                             SELECT
                                 id::text,
@@ -248,7 +243,7 @@ async def get_active_problems():
     """
     problems = []
 
-    pool = await get_db()
+    pool = _get_pool_or_none()
 
     # 1. Check for failing agents
     try:
@@ -268,17 +263,19 @@ async def get_active_problems():
                 """
                 rows = await conn.fetch(query)
                 for row in rows:
-                    failure_rate = row['failed'] / row['total'] * 100 if row['total'] > 0 else 0
+                    failure_rate = row["failed"] / row["total"] * 100 if row["total"] > 0 else 0
                     if failure_rate > 30:
-                        problems.append(ActiveProblem(
-                            id=f"agent-failure-{row['agent_name']}",
-                            severity="warning" if failure_rate < 50 else "critical",
-                            component=f"Agent: {row['agent_name']}",
-                            description=f"{failure_rate:.0f}% failure rate ({row['failed']}/{row['total']} failed). Last error: {row['last_error'] or 'Unknown'}",
-                            detected_at=datetime.utcnow(),
-                            suggested_action=f"Review agent {row['agent_name']} logs and restart if needed",
-                            auto_fixable=True
-                        ))
+                        problems.append(
+                            ActiveProblem(
+                                id=f"agent-failure-{row['agent_name']}",
+                                severity="warning" if failure_rate < 50 else "critical",
+                                component=f"Agent: {row['agent_name']}",
+                                description=f"{failure_rate:.0f}% failure rate ({row['failed']}/{row['total']} failed). Last error: {row['last_error'] or 'Unknown'}",
+                                detected_at=datetime.utcnow(),
+                                suggested_action=f"Review agent {row['agent_name']} logs and restart if needed",
+                                auto_fixable=True,
+                            )
+                        )
     except Exception as e:
         logger.warning(f"Failed to check agent failures: {e}")
 
@@ -296,15 +293,17 @@ async def get_active_problems():
                 try:
                     count = await conn.fetchval(query)
                     if count and count > 5:
-                        problems.append(ActiveProblem(
-                            id="api-quota-issue",
-                            severity="critical",
-                            component="AI Providers (OpenAI/Anthropic)",
-                            description=f"{count} rate limit or quota errors in the last hour. API calls may be failing.",
-                            detected_at=datetime.utcnow(),
-                            suggested_action="Check API billing and increase quotas or reduce request frequency",
-                            auto_fixable=False
-                        ))
+                        problems.append(
+                            ActiveProblem(
+                                id="api-quota-issue",
+                                severity="critical",
+                                component="AI Providers (OpenAI/Anthropic)",
+                                description=f"{count} rate limit or quota errors in the last hour. API calls may be failing.",
+                                detected_at=datetime.utcnow(),
+                                suggested_action="Check API billing and increase quotas or reduce request frequency",
+                                auto_fixable=False,
+                            )
+                        )
                 except:
                     pass
     except Exception as e:
@@ -313,38 +312,44 @@ async def get_active_problems():
     # 3. Check circuit breakers
     try:
         from service_circuit_breakers import get_all_circuit_statuses
+
         if get_all_circuit_statuses:
             statuses = get_all_circuit_statuses()
             for service, status in statuses.items():
-                if status.get('state') == 'open':
-                    problems.append(ActiveProblem(
-                        id=f"circuit-open-{service}",
-                        severity="critical",
-                        component=f"Service: {service}",
-                        description=f"Circuit breaker OPEN for {service}. Service is being bypassed due to failures.",
-                        detected_at=datetime.utcnow(),
-                        suggested_action=f"Check {service} service health and wait for circuit to close",
-                        auto_fixable=True
-                    ))
+                if status.get("state") == "open":
+                    problems.append(
+                        ActiveProblem(
+                            id=f"circuit-open-{service}",
+                            severity="critical",
+                            component=f"Service: {service}",
+                            description=f"Circuit breaker OPEN for {service}. Service is being bypassed due to failures.",
+                            detected_at=datetime.utcnow(),
+                            suggested_action=f"Check {service} service health and wait for circuit to close",
+                            auto_fixable=True,
+                        )
+                    )
     except Exception as e:
         logger.warning(f"Failed to check circuit breakers: {e}")
 
     # 4. Check memory system health
     try:
         from embedded_memory_system import get_embedded_memory
+
         if get_embedded_memory:
             mem = get_embedded_memory()
-            stats = await mem.get_stats() if hasattr(mem, 'get_stats') else None
-            if stats and stats.get('pending_tasks', 0) > 10:
-                problems.append(ActiveProblem(
-                    id="memory-backlog",
-                    severity="warning",
-                    component="Embedded Memory System",
-                    description=f"{stats['pending_tasks']} memory tasks pending. Memory sync may be lagging.",
-                    detected_at=datetime.utcnow(),
-                    suggested_action="Memory system will catch up automatically, or trigger force sync",
-                    auto_fixable=True
-                ))
+            stats = await mem.get_stats() if hasattr(mem, "get_stats") else None
+            if stats and stats.get("pending_tasks", 0) > 10:
+                problems.append(
+                    ActiveProblem(
+                        id="memory-backlog",
+                        severity="warning",
+                        component="Embedded Memory System",
+                        description=f"{stats['pending_tasks']} memory tasks pending. Memory sync may be lagging.",
+                        detected_at=datetime.utcnow(),
+                        suggested_action="Memory system will catch up automatically, or trigger force sync",
+                        auto_fixable=True,
+                    )
+                )
     except Exception as e:
         logger.warning(f"Failed to check memory system: {e}")
 
@@ -362,8 +367,8 @@ async def get_system_status():
     healing = await get_healing_history(limit=5, hours=24)
 
     # Calculate overall health
-    critical_count = len([p for p in problems if p.severity == 'critical'])
-    warning_count = len([p for p in problems if p.severity == 'warning'])
+    critical_count = len([p for p in problems if p.severity == "critical"])
+    warning_count = len([p for p in problems if p.severity == "warning"])
 
     if critical_count > 0:
         overall_health = "critical"
@@ -376,7 +381,7 @@ async def get_system_status():
 
     # Get agent health summary
     agent_summary = {}
-    pool = await get_db()
+    pool = _get_pool_or_none()
     if pool:
         try:
             async with pool.acquire() as conn:
@@ -394,10 +399,12 @@ async def get_system_status():
                 """
                 rows = await conn.fetch(query)
                 for row in rows:
-                    agent_summary[row['agent_name']] = {
-                        'executions_24h': row['total'],
-                        'success_rate': f"{(row['success']/row['total']*100):.0f}%" if row['total'] > 0 else "N/A",
-                        'last_run': row['last_run'].isoformat() if row['last_run'] else None
+                    agent_summary[row["agent_name"]] = {
+                        "executions_24h": row["total"],
+                        "success_rate": f"{(row['success']/row['total']*100):.0f}%"
+                        if row["total"] > 0
+                        else "N/A",
+                        "last_run": row["last_run"].isoformat() if row["last_run"] else None,
                     }
         except Exception as e:
             logger.warning(f"Failed to get agent summary: {e}")
@@ -406,10 +413,12 @@ async def get_system_status():
     recommendations = []
     if critical_count > 0:
         recommendations.append("⚠️ Address critical issues immediately")
-    if any('quota' in str(p.description).lower() for p in problems):
+    if any("quota" in str(p.description).lower() for p in problems):
         recommendations.append("💰 Review API billing - quota issues detected")
     if not healing:
-        recommendations.append("ℹ️ No recent self-healing actions - system may be stable or healing not triggered")
+        recommendations.append(
+            "ℹ️ No recent self-healing actions - system may be stable or healing not triggered"
+        )
     if len(agent_summary) < 5:
         recommendations.append("📊 Few agents active - consider activating more scheduled tasks")
     if overall_health == "healthy":
@@ -420,21 +429,20 @@ async def get_system_status():
         active_problems=problems,
         recent_healing_actions=healing,
         agent_health_summary=agent_summary,
-        recommendations=recommendations
+        recommendations=recommendations,
     )
 
 
 @router.get("/learning/insights", response_model=List[SystemInsight])
 async def get_learning_insights(
-    limit: int = Query(default=20, le=100),
-    category: Optional[str] = None
+    limit: int = Query(default=20, le=100), category: Optional[str] = None
 ):
     """
     Get insights the system has learned over time.
 
     This answers: "What has the AI OS learned?"
     """
-    pool = await get_db()
+    pool = _get_pool_or_none()
     if not pool:
         raise HTTPException(status_code=503, detail="Database unavailable")
 
@@ -510,64 +518,73 @@ async def ask_system(
     question_lower = question.lower()
 
     # Route to appropriate handler based on question
-    if any(word in question_lower for word in ['wrong', 'problem', 'issue', 'broken', 'failing']):
+    if any(word in question_lower for word in ["wrong", "problem", "issue", "broken", "failing"]):
         problems = await get_active_problems()
         if not problems:
             return {
                 "answer": "No active problems detected. All systems appear healthy.",
                 "confidence": 0.9,
-                "data": {"problems": []}
+                "data": {"problems": []},
             }
         else:
-            problem_list = "\n".join([f"- [{p.severity.upper()}] {p.component}: {p.description}" for p in problems])
+            problem_list = "\n".join(
+                [f"- [{p.severity.upper()}] {p.component}: {p.description}" for p in problems]
+            )
             return {
                 "answer": f"Found {len(problems)} issue(s):\n\n{problem_list}",
                 "confidence": 0.95,
-                "data": {"problems": [p.dict() for p in problems]}
+                "data": {"problems": [p.dict() for p in problems]},
             }
 
-    elif any(word in question_lower for word in ['agent', 'performing', 'running', 'status']):
+    elif any(word in question_lower for word in ["agent", "performing", "running", "status"]):
         status = await get_system_status()
-        agent_info = "\n".join([
-            f"- {name}: {info['executions_24h']} runs, {info['success_rate']} success"
-            for name, info in status.agent_health_summary.items()
-        ])
+        agent_info = "\n".join(
+            [
+                f"- {name}: {info['executions_24h']} runs, {info['success_rate']} success"
+                for name, info in status.agent_health_summary.items()
+            ]
+        )
         return {
             "answer": f"System Status: {status.overall_health.upper()}\n\nAgent Performance (24h):\n{agent_info or 'No agent data available'}",
             "confidence": 0.9,
-            "data": status.dict()
+            "data": status.dict(),
         }
 
-    elif any(word in question_lower for word in ['heal', 'fix', 'repair', 'recover']):
+    elif any(word in question_lower for word in ["heal", "fix", "repair", "recover"]):
         healing = await get_healing_history(limit=10, hours=24)
         if not healing:
             return {
                 "answer": "No self-healing actions in the last 24 hours. Either the system is stable or no auto-fixable issues occurred.",
                 "confidence": 0.85,
-                "data": {"healing_actions": []}
+                "data": {"healing_actions": []},
             }
         else:
-            heal_list = "\n".join([f"- {h.timestamp.strftime('%H:%M')}: Fixed {h.issue_type} in {h.affected_component}" for h in healing[:5]])
+            heal_list = "\n".join(
+                [
+                    f"- {h.timestamp.strftime('%H:%M')}: Fixed {h.issue_type} in {h.affected_component}"
+                    for h in healing[:5]
+                ]
+            )
             return {
                 "answer": f"{len(healing)} self-healing action(s) in the last 24h:\n\n{heal_list}",
                 "confidence": 0.9,
-                "data": {"healing_actions": [h.dict() for h in healing]}
+                "data": {"healing_actions": [h.dict() for h in healing]},
             }
 
-    elif any(word in question_lower for word in ['learn', 'insight', 'know']):
+    elif any(word in question_lower for word in ["learn", "insight", "know"]):
         insights = await get_learning_insights(limit=5)
         if not insights:
             return {
                 "answer": "No learning insights recorded yet. The system will learn from interactions over time.",
                 "confidence": 0.7,
-                "data": {"insights": []}
+                "data": {"insights": []},
             }
         else:
             insight_list = "\n".join([f"- [{i.category}] {i.insight[:100]}..." for i in insights])
             return {
                 "answer": f"Recent learnings:\n\n{insight_list}",
                 "confidence": 0.85,
-                "data": {"insights": [i.dict() for i in insights]}
+                "data": {"insights": [i.dict() for i in insights]},
             }
 
     else:
@@ -575,12 +592,12 @@ async def ask_system(
         status = await get_system_status()
         return {
             "answer": f"System Health: {status.overall_health.upper()}\n"
-                     f"Active Problems: {len(status.active_problems)}\n"
-                     f"Recent Healing: {len(status.recent_healing_actions)} actions\n"
-                     f"Active Agents: {len(status.agent_health_summary)}\n\n"
-                     f"Recommendations:\n" + "\n".join(status.recommendations),
+            f"Active Problems: {len(status.active_problems)}\n"
+            f"Recent Healing: {len(status.recent_healing_actions)} actions\n"
+            f"Active Agents: {len(status.agent_health_summary)}\n\n"
+            f"Recommendations:\n" + "\n".join(status.recommendations),
             "confidence": 0.8,
-            "data": status.dict()
+            "data": status.dict(),
         }
 
 
@@ -593,8 +610,8 @@ async def quick_status():
     Returns: "HEALTHY", "WARNING", "DEGRADED", or "CRITICAL"
     """
     problems = await get_active_problems()
-    critical = len([p for p in problems if p.severity == 'critical'])
-    warnings = len([p for p in problems if p.severity == 'warning'])
+    critical = len([p for p in problems if p.severity == "critical"])
+    warnings = len([p for p in problems if p.severity == "warning"])
 
     if critical > 0:
         return {"status": "CRITICAL", "problems": critical, "warnings": warnings}

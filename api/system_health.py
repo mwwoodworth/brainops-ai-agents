@@ -85,7 +85,7 @@ async def system_awareness():
             "SELECT COUNT(*) FROM mrg_subscriptions WHERE status = 'active'"
         )
         mrg_mrr = await pool.fetchval(
-            "SELECT COALESCE(SUM(price_amount), 0) FROM mrg_subscriptions WHERE status = 'active'"
+            "SELECT COALESCE(SUM(amount), 0) FROM mrg_subscriptions WHERE status = 'active'"
         )
         if mrg_active == 0:
             issues.append(

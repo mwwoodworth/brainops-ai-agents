@@ -199,7 +199,7 @@ API_KEYS, BRAINOPS_API_KEY
 ```bash
 OUTBOUND_EMAIL_MODE=live        # Real emails
 GUMROAD_AUTOMATIONS_ENABLED=true # Gumroad automation
-# Stripe keys start with ***REMOVED***_ (LIVE MODE)
+# Stripe keys start with sk_live_ (LIVE MODE)
 ```
 
 ---

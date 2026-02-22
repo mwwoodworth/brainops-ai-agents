@@ -75,9 +75,9 @@ async def get_payment_status() -> dict[str, Any]:
     stripe_mode = "unavailable"
     if stripe_client and stripe_available:
         # Detect mode from the configured secret key prefix (never return the key).
-        if stripe_key.startswith(("***REMOVED***_", "rk_live_")):
+        if stripe_key.startswith(("sk_live_", "rk_live_")):
             stripe_mode = "live"
-        elif stripe_key.startswith(("***REMOVED***_", "rk_test_")):
+        elif stripe_key.startswith(("sk_test_", "rk_test_")):
             stripe_mode = "test"
         else:
             stripe_mode = "unknown"

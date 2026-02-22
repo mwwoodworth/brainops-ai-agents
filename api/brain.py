@@ -52,8 +52,8 @@ _SECRET_REPLACEMENTS: list[tuple[re.Pattern[str], str]] = [
         "<REDACTED_BRAINOPS_API_KEY>",
     ),
     (re.compile(r"\brnd_[A-Za-z0-9]{10,}\b"), "rnd_<REDACTED>"),
-    (re.compile(r"\b***REMOVED***_[A-Za-z0-9]{10,}\b"), "***REMOVED***_<REDACTED>"),
-    (re.compile(r"\b***REMOVED***_[A-Za-z0-9]{10,}\b"), "***REMOVED***_<REDACTED>"),
+    (re.compile(r"\bsk_live_[A-Za-z0-9]{10,}\b"), "sk_live_<REDACTED>"),
+    (re.compile(r"\bsk_test_[A-Za-z0-9]{10,}\b"), "sk_test_<REDACTED>"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"), "<REDACTED_JWT>"),
     # Redact DB URL passwords (keep scheme/user/host/path)
     (

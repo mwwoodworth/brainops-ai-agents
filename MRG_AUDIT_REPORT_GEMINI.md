@@ -31,7 +31,7 @@ The codebase is feature-rich and uses modern tooling (Next.js 16, Supabase, Stri
 
 ### 🟡 MEDIUM
 *   **Hardcoded Secrets in Documentation**:
-    *   Files like `REVENUE_ASSESSMENT_QUICK_SUMMARY.txt` and `CLAUDE.md` contain strings starting with `***REMOVED***_`. While they appear to be truncated (`...`), this encourages bad practices and risks accidental commits of real keys.
+    *   Files like `REVENUE_ASSESSMENT_QUICK_SUMMARY.txt` and `CLAUDE.md` contain strings starting with `sk_live_`. While they appear to be truncated (`...`), this encourages bad practices and risks accidental commits of real keys.
 
 ---
 
