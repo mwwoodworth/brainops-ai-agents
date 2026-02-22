@@ -487,7 +487,14 @@ app.add_middleware(
     allow_origins=config.security.allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-API-Key",
+        "X-Correlation-ID",
+        "X-Tenant-ID",
+        "Accept",
+    ],
 )
 
 # Database configuration (MCP must use read-only credentials in production)
